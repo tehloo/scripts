@@ -42,18 +42,55 @@ while (my $line = <STDIN> )
 }
 
 
-if ($#aLru != $#aProc )
+if ($#aLru != $#aProc || $#aProc != $#aPID )
 {
-	print "\n ERROR! array number mismatch!!! lru=".$#aLru."/ proc=".$#aProc."\n"
+	print "\n ERROR! array number mismatch!!! lru=".$#aLru."/ proc=".$#aProc."/ PID=".$#aPID."\n"
+}
+
+
+
+my $idx;
+my $idx_2;
+my $tempLru;
+my $tempPID;
+my $tempProc;
+
+for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
+{
+	print "$idx\t".$aLru[$idx]."\t".$aProc[$idx]."\t".$aPID[$idx]."\n";
 }
 
 print "\n ".($#aProc+1)." process found.\n\n";
 
-# sort.
-my @sortLru = sort {$a <=> $b} @aLru;
-my $index = 1;
+for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
+{
+	for ( $idx_2 = $idx; $idx_2 <= $#aLru ; $idx_2++ )
+	{
+		if ( $aLru[$idx] < $aLru[$idx_2] ) 
+		{
+			$tempLru = $aLru[$idx];
+			$tempPID = $aPID[$idx];
+			$tempProc = $aProc[$idx];
+			
+			$aLru[$idx] = $aLru[$idx_2];
+			$aPID[$idx] = $aPID[$idx_2];
+			$aProc[$idx] = $aProc[$idx_2];
+			
+			$aLru[$idx_2] = $tempLru;
+			$aPID[$idx_2] = $tempPID;
+			$aProc[$idx_2] = $tempProc;		
+		}
+	}
+	#print $itemLRU."\n";
+	$idx++;
+}
 
+for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
+{
+	print "$idx\t".$aLru[$idx]."\t".$aProc[$idx]."\t".$aPID[$idx]."\n";
+}
 
+=cut
 while ( my $lru = shift(@sortLru))
 {
 	print $index++.".";
@@ -69,7 +106,7 @@ while ( my $lru = shift(@sortLru))
 		}
 	}
 }
-
+=cut
 
 sub plog
 {
