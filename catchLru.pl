@@ -2,20 +2,31 @@
 
 use strict;
 use warnings;
+use POSIX 'isatty';
+
+if ( ! @ARGV && isatty(*STDIN) ) {
+    die "usage: ...";
+}
 
 my $enableLog = 0;
+my $HF;
 
+if (@ARGV)
+{
+	open ($HF, $ARGV[0]) if ( -f $ARGV[0]  );
+	print "File Opened.\n";
+	
+}
+else {$HF = \*STDIN;}
 
-plog ("File opened");
 my $bReadyGetLru=0;
 my @aProc;
 my @aPID;
 my @aLru;
 my %proc_info=();
 
-while (my $line = <STDIN> )
+while ( my $line = <$HF> )
 {	
-		
 	if ( $line =~ /Processes in Current Activity Manager State:/ )	{
 		plog ("Found start sign");		
 	}
@@ -41,19 +52,24 @@ while (my $line = <STDIN> )
 	}
 }
 
+print $#aLru."\n";
+print $#aProc."\n";
+print $#aPID."\n";
 
-if ($#aLru != $#aProc || $#aProc != $#aPID )
+
+if ($#aLru != $#aProc || $#aProc != $#aPID)
 {
-	print "\n ERROR! array number mismatch!!! lru=".$#aLru."/ proc=".$#aProc."/ PID=".$#aPID."\n"
+	print "\n ERROR! array number mismatch!!! lru=".$#aLru."/ proc=".$#aProc."/ PID=".$#aPID."\n";
+	die;
 }
 
-
+if ($#aLru == -1)
+{
+	print "\n no matches found!!!\n";
+	die;
+}
 
 my $idx;
-my $idx_2;
-my $tempLru;
-my $tempPID;
-my $tempProc;
 
 for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
 {
@@ -62,35 +78,31 @@ for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
 
 print "\n ".($#aProc+1)." process found.\n\n";
 
-for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
-{
-	for ( $idx_2 = $idx; $idx_2 <= $#aLru ; $idx_2++ )
-	{
-		if ( $aLru[$idx] < $aLru[$idx_2] ) 
-		{
-			$tempLru = $aLru[$idx];
-			$tempPID = $aPID[$idx];
-			$tempProc = $aProc[$idx];
-			
-			$aLru[$idx] = $aLru[$idx_2];
-			$aPID[$idx] = $aPID[$idx_2];
-			$aProc[$idx] = $aProc[$idx_2];
-			
-			$aLru[$idx_2] = $tempLru;
-			$aPID[$idx_2] = $tempPID;
-			$aProc[$idx_2] = $tempProc;		
-		}
-	}
-	#print $itemLRU."\n";
-	$idx++;
-}
+my $rank=1;
+my $highLru=-32768;
+my $highIdx=0;
 
-for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
-{
-	print "$idx\t".$aLru[$idx]."\t".$aProc[$idx]."\t".$aPID[$idx]."\n";
-}
-
+#for ( $rank = 0 ; $rank <= $#aLru ; $rank++ )
 =cut
+while ( $#aLru )
+{
+	for ( $idx = 0; $idx <= $#aLru ; $idx++ )
+	{
+		if ( $aLru[$idx] > $highLru )
+		{
+			$highLru = $aLru[$idx];
+			$highIdx = $idx;			
+		}
+	}	
+	print " ".$rank++."\t".$aPID[$highIdx]."\t".$highLru." ".$aProc[$highIdx]."\n";
+	splice(@aLru, $highIdx, 1);	
+	splice(@aProc, $highIdx, 1);	
+	splice(@aPID, $highIdx, 1);	
+	$highLru=0;
+}
+
+
+
 while ( my $lru = shift(@sortLru))
 {
 	print $index++.".";
