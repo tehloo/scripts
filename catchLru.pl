@@ -18,137 +18,222 @@ if (@ARGV)
 }
 else {$HF = \*STDIN;}
 
-my $bReadyGetLru=0;
+
 my @aProc;
 my @aPID;
 my @aLru;
 #my @aOomList;
 my @aStrOom;
 
-my %proc_info=();
+
+#hashes for processes...
+my @aOrder;
+#my %hOrder= ();
+my %hProc= ();
+my %hUid= ();
+my %hAdjType= ();
+my %hCurAdj= ();
+my %hPss= ();
+my %hLru= ();
+my %hAdj= ();
+
+my %hSumAdjType= ();
+
+
+#my %proc_info=();
+my $iPhase = 0;
 my $numProc=0;
 my $maxLengProc=0;
+my $maxLengAdjType=0;
+my $cntStack =0;
+my $cntPERS = 0;
+
+my $nPid=0;
+my $TotalPssSum=0;
+
+my $countPhase2=0;
 
 while ( my $line = <$HF> )
 {	
+	
+	if ($iPhase == 0)
+	{
+		if ( $line =~ /Processes in Current Activity Manager State:/ )	{
+			plog ("Found start sign");		
+		}
+		
+		elsif ($nPid==0 && $line =~ /\*APP\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
+		{
+			plog ("\n\t* process=$3\tUID=$1\tpid=$2\t/whatis?=$4");
+			$nPid=int($2);
+			
+			push @aProc, $3;
+			push @aPID, int($2);
+			
+			#$hProc{$nPid} = $3;
+			
+								
+			$maxLengProc = ($maxLengProc < length($3) ? length($3) : $maxLengProc);
+		}
 
-	if ( $line =~ /Processes in Current Activity Manager State:/ )	{
-		plog ("Found start sign");		
+		elsif ($nPid>0 && $line =~ /\s+lastActivityTime=(\S+) lruWeight=(\S+) (.*)/ )
+		{
+			plog ("\t\t lastActivityTime=$1 lruWeight=$2 / $3");		
+			push @aLru, $2;
+			
+			$hLru{$nPid} = $2;
+		}
+		
+	#	elsif ($nPid==1 && $line =~ /\s+oom: max=(\d+) hidden=(\d+) curRaw=(\d+) setRaw=(\d+) cur=(\d+) set=(\d+)/ )
+		elsif ($nPid>0 && $line =~ /\s+oom: (.+)$/ )
+		{
+			plog ("\t\t oom=$1");
+			push @aStrOom, $1 ;
+			
+			
+			# int($1) if ( $1 =~ /cur=(\d+)/ );			
+			$hCurAdj{$nPid} = int($1) if ( $1 =~ /cur=(\d+)/ );
+			
+			$nPid=0;
+		}
+		
+		elsif ( $line =~ /Running processes \(most recent first\):/ )	{
+			plog ("now we meet the stack list");
+			$iPhase++;
+		}
 	}
 	
-	elsif ($line =~ /\*APP\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
+#
+#	NOW match with stack list!!
+#
+	elsif ($iPhase == 1)
 	{
-		plog ("\n\t* process=$3\tUID=$1\tpid=$2\t/whatis?=$4");
-		$bReadyGetLru=1;
-		push @aProc, $3;
-		push @aPID, $2;
+		if ( $line =~ /(\S{4}) #\s*(\d+): adj=(\S{3,5})\s*\/\S \S+ (\d+):(\S+)\/(\d+) (\S+)/ )
+		{
+			my $pid = int($4);
+			$cntPERS++ if ( $1 eq "PERS" );
+			if ( $2 == $cntStack ) {$cntStack++;}
+			else { print "\nSomething wrong!\n"; last; }	
+			
+			push @aOrder, ($pid);
+			$hAdjType{$pid} = $7;
+			SumAdjType ($7);	
+			$hProc{$pid} = $5;	
+			$hUid{$pid} = $6;
+			$hAdj{$pid} = $3;
+			
+			$maxLengAdjType = ($maxLengAdjType < length($7) ? length($7) : $maxLengAdjType);			
+			
+				
+		}
+		elsif ( $line =~ /PID mappings:/ ) {$iPhase++;};
 		
-		$maxLengProc = ($maxLengProc < length($3) ? length($3) : $maxLengProc);
-	}
-
-	elsif ($bReadyGetLru==1 && $line =~ /\s+lastActivityTime=(\S+) lruWeight=(\S+) (.*)/ )
-	{
-		plog ("\t\t lastActivityTime=$1 lruWeight=$2 / $3");		
-		push @aLru, $2;		
 	}
 	
-#	elsif ($bReadyGetLru==1 && $line =~ /\s+oom: max=(\d+) hidden=(\d+) curRaw=(\d+) setRaw=(\d+) cur=(\d+) set=(\d+)/ )
-	elsif ($bReadyGetLru==1 && $line =~ /\s+oom: (.+)$/ )
+#
+#	Grep PSSs
+#	
+	elsif ($iPhase == 2)
 	{
-		plog ("\t\t oom=$1");
-=cut
-		plog ("\t\t max=$1 hidden=$2 curRaw=$3 setRaw=$4 cur=$5 set=$6");
-		my @aOomItem;
-		
-		push @aOomItem, $1;
-		push @aOomItem, $2;
-		push @aOomItem, $3;
-		push @aOomItem, $4;
-		push @aOomItem, $5;
-		push @aOomItem, $6;
-		
-		push @aOomList, @aOomItem;
-=cut	
-		push @aStrOom, $1 ;
-		$bReadyGetLru=0;
+		if ($nPid == 0 && $line =~ /\*\* MEMINFO in pid (\d+) \[(\S+)\] \*\*/ )
+		{
+			$countPhase2++;
+			$nPid=$1;
+		}
+		elsif ( $nPid > 0 && $line =~ /\s+\(Pss\):\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/ )
+		{
+			$hPss{$nPid} = int($1);
+			$TotalPssSum+=int($1);
+			$nPid=0;
+		}
 	}
-
 }
 
-if ($#aLru != $#aProc || $#aProc != $#aPID)
-{
-	print "\n ERROR! array number mismatch!!! lru=".$#aLru."/ proc=".$#aProc."/ PID=".$#aPID."\n";
-	die;
-}
-
-if ($#aLru == -1)
-{
-	print "\n no matches found!!!\n";
-	die;
-}
-
-my $idx;
-
-for ( $idx = 0 ; $idx <= $#aLru ; $idx++ )
+for ( my $idx = 0 ; $idx <= $#aLru ; $idx++ )
 {
 	plog ("$idx\t".$aLru[$idx]."\t".$aProc[$idx]."\t".$aPID[$idx]);
 }
 
-print "\n ".($#aProc+1)." process found.\n\n";
+my $iOrder=1;
 
-my $rank=1;
-my $highLru=-99999;
-my $highIdx=0;
+print "\n no  pid"; print " Process"; print " " foreach(6..$maxLengProc);
+print " uid  Adjust type"; print " " foreach(11..$maxLengAdjType); print " cur  Pss  Lru      adj\n";
+print " -- ---- "; print "-" foreach(0..$maxLengProc);
+print " ----- "; print "-" foreach(0..$maxLengAdjType); print " --- ---- -------- -----\n";
+	
+while ( my $pid = shift @aOrder )
+{			
+	my $strProc = defined $hProc{$pid} ? $hProc{$pid} : "";
+	
+	printf (" %2d %4d %s",$iOrder++,$pid, $strProc);
+	print " " foreach(length($strProc)..$maxLengProc);
+	printf (" %5d %s",$hUid{$pid},$hAdjType{$pid});
+	print " " foreach(length($hAdjType{$pid})..$maxLengAdjType);	
+	defined($hCurAdj{$pid}) ? printf " %2d",$hCurAdj{$pid}: print "  -";
+	defined($hPss{$pid}) ? printf " %5d",$hPss{$pid}: print "     -";
+	defined($hLru{$pid}) ? printf " %8d",$hLru{$pid}: print "     -   ";	
+	defined($hAdj{$pid}) ? printf " %s",$hAdj{$pid}: print "     -";
+	
+	print "\n";
+}
 
-#for ( $rank = 0 ; $rank <= $#aLru ; $rank++ )
-print " rank\t PID\t LRU\t  Process name\n";
-print " ----\t----\t-------\t ------------------------------------\n";
-while ( $#aLru >= 0 )
+print "\n ".($#aProc+1)." processes found in dumpsys / $cntStack processes found in Stack. ( $cntPERS persistent processes )\n\n";
+
+for my $type ( keys %hSumAdjType )
 {
-	for ( $idx = 0; $idx <= $#aLru ; $idx++ )
-	{
-		if ( $aLru[$idx] > $highLru )
+	my $PssSum=0;
+	
+	for my $pid ( keys %hAdjType )
+	{	
+		if ( $hAdjType{$pid} eq $type )
 		{
-			$highLru = $aLru[$idx];
-			$highIdx = $idx;			
+			$PssSum+=$hPss{$pid} if defined($hPss{$pid});	
 		}
 	}	
-	print " ".$rank++."\t".$aPID[$highIdx]."\t".$highLru;
-	print "\t" if ( $highLru < 10000000 );
-	print " ".$aProc[$highIdx];
-	my $iBlank = $maxLengProc - length($aProc[$highIdx]);
-	print " " while ( $iBlank-- > 0);
-#	print "\t".$aOomList[$highIdx];	
-	print " ".$aStrOom[$highIdx];
-	print "\n";
-	
-	splice(@aLru, $highIdx, 1);	
-	splice(@aProc, $highIdx, 1);	
-	splice(@aPID, $highIdx, 1);	
-	splice(@aStrOom, $highIdx, 1);	
-	$highLru=-99999;
+	print " $type "; 
+	print " " foreach(length($type)..$maxLengAdjType);	
+	print ": $PssSum kB ($hSumAdjType{$type})\n";
 }
-print " ----\t----\t-------\t ------------------------------------\n";
 
-=cut
-
-
-while ( my $lru = shift(@sortLru))
-{
-	print $index++.".";
-	my $iLru = $#aLru+1;	
-	while ($iLru--)
-	{
-		if ($lru == $aLru[$iLru]) 
-		{
-			my $temp = 8 - length($lru);
-			print " "; while ($temp--) {print " ";}			
-			print $lru." : ".$aProc[$iLru]."\n";		
-			last;
-		}
+my %SumAdj = ();
+my $adj;
+for $adj ( keys %hAdj )
+{	
+	my $pid = $hAdj{$adj};
+	if (defined($SumAdj{$pid}))
+	{	 
+		$SumAdj{$pid}++;
+	}
+	else { 
+		$SumAdj{$pid}=1; 
 	}
 }
-=cut
+
+print "\n";
+
+for $adj ( keys %SumAdj )
+{
+	my $PssSum = 0;
+	for my $pid ( keys %hAdj )
+	{
+		if ( $hAdj{$pid} eq $adj )
+		{
+			$PssSum += $hPss{$pid} if defined($hPss{$pid});
+		}
+	}
+	print " $adj\t: $PssSum kB ($SumAdj{$adj})\n";
+}
+
+printf "\n total Pss = %.2f MB (%d kB)\n", ($TotalPssSum/1024), $TotalPssSum;
+	
+sub SumAdjType 
+{
+	plog ("add key as $_[0] and value + 1");	
+	if (defined ($hSumAdjType{$_[0]}))
+	{$hSumAdjType{$_[0]}++;}
+	else	
+	{ $hSumAdjType{$_[0]}=1;}
+}
 
 sub plog
 {
