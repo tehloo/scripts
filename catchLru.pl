@@ -36,6 +36,7 @@ my %hCurAdj= ();
 my %hPss= ();
 my %hLru= ();
 my %hAdj= ();
+my %hLastAct = ();
 
 my %hSumAdjType= ();
 
@@ -73,7 +74,7 @@ while ( my $line = <$HF> )
 			#$hProc{$nPid} = $3;
 			
 								
-			$maxLengProc = ($maxLengProc < length($3) ? length($3) : $maxLengProc);
+			#$maxLengProc = ($maxLengProc < length($3) ? length($3) : $maxLengProc);
 		}
 
 		elsif ($nPid>0 && $line =~ /\s+lastActivityTime=(\S+) lruWeight=(\S+) (.*)/ )
@@ -82,6 +83,7 @@ while ( my $line = <$HF> )
 			push @aLru, $2;
 			
 			$hLru{$nPid} = $2;
+			$hLastAct{$nPid} = $1;
 		}
 		
 	#	elsif ($nPid==1 && $line =~ /\s+oom: max=(\d+) hidden=(\d+) curRaw=(\d+) setRaw=(\d+) cur=(\d+) set=(\d+)/ )
@@ -122,6 +124,7 @@ while ( my $line = <$HF> )
 			$hUid{$pid} = $6;
 			$hAdj{$pid} = $3;
 			
+			$maxLengProc = ($maxLengProc < length($5) ? length($5) : $maxLengProc);
 			$maxLengAdjType = ($maxLengAdjType < length($7) ? length($7) : $maxLengAdjType);			
 			
 				
@@ -173,7 +176,7 @@ while ( my $pid = shift @aOrder )
 	defined($hPss{$pid}) ? printf " %5d",$hPss{$pid}: print "     -";
 	defined($hLru{$pid}) ? printf " %8d",$hLru{$pid}: print "     -   ";	
 	defined($hAdj{$pid}) ? printf " %s",$hAdj{$pid}: print "     -";
-	
+	defined($hLastAct{$pid}) ? printf " %s",$hLastAct{$pid}: print "     -";
 	print "\n";
 }
 
