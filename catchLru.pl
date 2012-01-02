@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 use POSIX 'isatty';
+use Scalar::Util qw(looks_like_number);
 
 if ( ! @ARGV && isatty(*STDIN) ) {
     die "usage: ...";
@@ -53,10 +54,10 @@ my $nPid=0;
 my $TotalPssSum=0;
 
 my $countPhase2=0;
+my $bIsICS;
 
 while ( my $line = <$HF> )
-{	
-	
+{		
 	if ($iPhase == 0)
 	{
 		if ( $line =~ /Processes in Current Activity Manager State:/ )	{
@@ -95,12 +96,19 @@ while ( my $line = <$HF> )
 			
 			# int($1) if ( $1 =~ /cur=(\d+)/ );			
 			$hCurAdj{$nPid} = int($1) if ( $1 =~ /cur=(\d+)/ );
-			
+			plog ("\t\t CurAdj=$hCurAdj{$nPid}");
 			$nPid=0;
 		}
-		
+		# for GB
 		elsif ( $line =~ /Running processes \(most recent first\):/ )	{
-			plog ("now we meet the stack list");
+			plog ("\n ** now we meet the stack list. we gathered $#aPID pids. **");
+			$bIsICS = 0;
+			$iPhase++;
+		}
+		# for ICS
+		elsif ( $line =~ /Process LRU list \(sorted by oom_adj\):/ )	{
+			plog ("\n ** now we meet the stack list.  we gathered $#aPID pids. **");
+			$bIsICS = 1;
 			$iPhase++;
 		}
 	}
@@ -110,13 +118,18 @@ while ( my $line = <$HF> )
 #
 	elsif ($iPhase == 1)
 	{
-		if ( $line =~ /(\S{4}) #\s*(\d+): adj=(\S{3,5})\s*\/\S \S+ (\d+):(\S+)\/(\d+) (\S+)/ )
+		if (( $line =~ /(\S{4}) #\s*(\d+): adj=(\S{3,5})\s*\/\S \S+ (\d+):(\S+)\/(\d+) (\S+)/ && !$bIsICS) || 
+			($line =~ /(\S{4}) #\s*(\d+): adj=(\S{3,5})\s*\/\S+\s+trm=\s*\d (\d+):(\S+)\/(\d+) (\S+)/ && $bIsICS))
 		{
+			plog (" lru list! - $1 $2 $3 $4 $5 $6 $7");
 			my $pid = int($4);
 			$cntPERS++ if ( $1 eq "PERS" );
-			if ( $2 == $cntStack ) {$cntStack++;}
-			else { print "\nSomething wrong!\n"; last; }	
-			
+			if (!$bIsICS)
+			{
+				if ( $2 == $cntStack ) {$cntStack++;}
+				else { print "\nSomething wrong!\n"; last; }	
+			}
+			else { $cntStack++; }
 			push @aOrder, ($pid);
 			$hAdjType{$pid} = $7;
 			SumAdjType ($7);	
@@ -129,7 +142,11 @@ while ( my $line = <$HF> )
 			
 				
 		}
-		elsif ( $line =~ /PID mappings:/ ) {$iPhase++;};
+		elsif ( $line =~ /PID mappings:/ ) 
+		{
+			$iPhase++;
+			plog ("\n ** now we meet the PID mappings! **");
+		}
 		
 	}
 	
@@ -140,63 +157,100 @@ while ( my $line = <$HF> )
 	{
 		if ($nPid == 0 && $line =~ /\*\* MEMINFO in pid (\d+) \[(\S+)\] \*\*/ )
 		{
+			plog ("\t\t - met pid info for $1");
 			$countPhase2++;
 			$nPid=$1;
 		}
-		elsif ( $nPid > 0 && $line =~ /\s+\(Pss\):\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/ )
+		elsif ( $nPid > 0 && $bIsICS ==0 && $line =~ /\s+\(Pss\):\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/ )
 		{
+			$hPss{$nPid} = int($1);
+			$TotalPssSum+=int($1);
+			$nPid=0;
+		}
+		elsif ( $nPid > 0 && $bIsICS ==1 && $line =~ /\s+TOTAL\s+(\S+)/ )
+		{
+			plog ("\t\t\t and also found pss $1");
 			$hPss{$nPid} = int($1);
 			$TotalPssSum+=int($1);
 			$nPid=0;
 		}
 	}
 }
-
+=cut
 for ( my $idx = 0 ; $idx <= $#aLru ; $idx++ )
 {
 	plog ("$idx\t".$aLru[$idx]."\t".$aProc[$idx]."\t".$aPID[$idx]);
 }
+=cut
 
-my $iOrder=1;
-
-print "\n no  pid"; print " Process"; print " " foreach(6..$maxLengProc);
-print " uid  Adjust type"; print " " foreach(11..$maxLengAdjType); print " cur  Pss  Lru      adj\n";
-print " -- ---- "; print "-" foreach(0..$maxLengProc);
-print " ----- "; print "-" foreach(0..$maxLengAdjType); print " --- ---- -------- -----\n";
+# reorder the list.
+my @reOrder;
+my $i = @aOrder;
+foreach (0..$i)
+{	
+	my $pid=-1;
+	my $index = 0;
+	my $adj=100;
+	my $j=0;
 	
-while ( my $pid = shift @aOrder )
+	foreach ( @aOrder ) 
+	{		
+		#print $hCurAdj{$_}." ";
+		if (!(defined $hCurAdj{$_}))
+		{
+			$pid = $aOrder[$j];
+			$adj = $hCurAdj{$pid};			
+			$index = $j;
+			last;
+		}
+		elsif (defined $hCurAdj{$_})		
+		{
+			if ($adj > $hCurAdj{$_} )
+			{
+				$pid = $aOrder[$j];
+				$adj = $hCurAdj{$pid};			
+				$index = $j;
+				#print "($pid/$adj/$index) ";
+			}
+		}
+		#$adj = 100 if (!looks_like_number($adj));
+		$j++;
+	}	
+	#print " - $pid, $index \n";
+	push @reOrder, $pid if ($pid>0);
+	#$aOrder[$index] = 0;	#or 
+	splice @aOrder,$index,1;
+}
+
+#=cut
+my $iOrder=1;
+$maxLengProc = 50;
+
+print "\n no  pid "; print " Process"; print " " foreach(6..$maxLengProc-1);
+print "Adjust type"; print " " foreach(11..$maxLengAdjType); print " cur  Pss    Lru   adj   last CPU time\n";
+print " -- ----- "; print "-" foreach(0..$maxLengProc-1);print " ";
+print "-" foreach(0..$maxLengAdjType); print " --- ---- -------- ----- ------------\n";
+	
+while ( my $pid = shift @reOrder )
 {			
 	my $strProc = defined $hProc{$pid} ? $hProc{$pid} : "";
+	$strProc = ( length($strProc) > $maxLengProc ) ? substr ($strProc, 0, $maxLengProc-3)."..": $strProc;
 	
-	printf (" %2d %4d %s",$iOrder++,$pid, $strProc);
+	printf (" %2d %5d %s",$iOrder++,$pid, $strProc);
 	print " " foreach(length($strProc)..$maxLengProc);
-	printf (" %5d %s",$hUid{$pid},$hAdjType{$pid});
+	#printf (" %5d %s",$hUid{$pid},$hAdjType{$pid});
+	print ("$hAdjType{$pid}");
 	print " " foreach(length($hAdjType{$pid})..$maxLengAdjType);	
 	defined($hCurAdj{$pid}) ? printf " %2d",$hCurAdj{$pid}: print "  -";
 	defined($hPss{$pid}) ? printf " %5d",$hPss{$pid}: print "     -";
 	defined($hLru{$pid}) ? printf " %8d",$hLru{$pid}: print "     -   ";	
 	defined($hAdj{$pid}) ? printf " %s",$hAdj{$pid}: print "     -";
-	defined($hLastAct{$pid}) ? printf " %s",$hLastAct{$pid}: print "     -";
+	print " " foreach(length($hAdj{$pid})..6);	
+	defined($hLastAct{$pid}) ? printf "%s",$hLastAct{$pid}: print "   -";
 	print "\n";
 }
 
 print "\n ".($#aProc+1)." processes found in dumpsys / $cntStack processes found in Stack. ( $cntPERS persistent processes )\n\n";
-
-for my $type ( keys %hSumAdjType )
-{
-	my $PssSum=0;
-	
-	for my $pid ( keys %hAdjType )
-	{	
-		if ( $hAdjType{$pid} eq $type )
-		{
-			$PssSum+=$hPss{$pid} if defined($hPss{$pid});	
-		}
-	}	
-	print " $type "; 
-	print " " foreach(length($type)..$maxLengAdjType);	
-	print ": $PssSum kB ($hSumAdjType{$type})\n";
-}
 
 my %SumAdj = ();
 my $adj;
@@ -212,8 +266,10 @@ for $adj ( keys %hAdj )
 	}
 }
 
-print "\n";
 
+# summary for adj.
+my $PssSumBak=0;
+my $CntBak = 0;
 for $adj ( keys %SumAdj )
 {
 	my $PssSum = 0;
@@ -224,10 +280,38 @@ for $adj ( keys %SumAdj )
 			$PssSum += $hPss{$pid} if defined($hPss{$pid});
 		}
 	}
-	print " $adj\t: $PssSum kB ($SumAdj{$adj})\n";
+	if ( $adj =~ /bak/)
+	{
+		$PssSumBak += $PssSum;
+		$CntBak += $SumAdj{$adj};
+	}
+	else 
+	{	print " $adj\t: $PssSum kB ($SumAdj{$adj})\n"; }
 }
+print " bak\t: $PssSumBak kB ($CntBak)\n";
+print "\n";
 
-printf "\n total Pss = %.2f MB (%d kB)\n", ($TotalPssSum/1024), $TotalPssSum;
+=cut
+# summary for adj. type
+for my $type ( keys %hSumAdjType )
+{
+	my $PssSum=0;
+	
+	for my $pid ( keys %hAdjType )
+	{	
+		if ( $hAdjType{$pid} eq $type )
+		{
+			$PssSum+=$hPss{$pid} if defined($hPss{$pid});	
+		}
+	}	
+	print " $type "; 
+	print " " foreach(length($type)..$maxLengAdjType);	
+	print ": $PssSum kB ($hSumAdjType{$type})\n";
+}
+=cut
+
+printf " total Pss = %.2f MB (%d kB)   !! please mind, this pss`s are collected from 'dumpsys' which is smaller than from 'procrank'.\n", ($TotalPssSum/1024), $TotalPssSum;
+#=cut
 	
 sub SumAdjType 
 {
