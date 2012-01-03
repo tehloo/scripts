@@ -10,7 +10,7 @@ if ( ! @ARGV && isatty(*STDIN) ) {
 }
 
 my $bDebugging = 0;
-my $bEnableFindClients = 0;		# find clients for contents provider & service
+my $bEnableFindClients = 1;		# find clients for contents provider & service
 my $HF;
 
 if (@ARGV)
@@ -62,7 +62,7 @@ my $svcPID = -1;
 my %hPrvProc = ();
 my %hSvcProc = ();
 
-$iPhase = 0 if ($bEnableFindClients==0);
+#$iPhase = 0 if ($bEnableFindClients==0);
 
 while ( my $line = <$HF> )
 {
@@ -71,6 +71,18 @@ while ( my $line = <$HF> )
 		if ( $line =~ /Providers in Current Activity Manager State:/ )	{
 			plog ("Found provider state");
 			$iPhase = -2;
+		}
+		# for GB
+		elsif ( $line =~ /Running processes \(most recent first\):/)	{
+			plog ("\n ** it seems to be called as dumpsys activity **");
+			$bIsICS = 0;
+			$iPhase=1;
+		}
+		# for ICS
+		elsif ( $line =~ /Process LRU list \(sorted by oom_adj\):/ )	{
+			plog ("\n ** it seems to be called as dumpsys activity **");
+			$bIsICS = 1;
+			$iPhase=1;
 		}
 	}
 	#	grep provider info.
@@ -92,7 +104,7 @@ while ( my $line = <$HF> )
 			$iPhase = -1;
 			$svcPID = -1;
 			$svcProc = "";
-			$bDebugging = 0;
+			#$bDebugging = 1;
 		}		
 	}
 	#	grep service info.
@@ -104,31 +116,37 @@ while ( my $line = <$HF> )
 			$svcPID = $1;
 			$svcProc = $2;
 		}
+		elsif ( $line =~ /app=null/)
+		{
+			$svcPID = -1;
+			$svcProc = "";
+		}
 		elsif ( $line =~ /\s{6}\* Client AppBindRecord{\S+ ProcessRecord{\S+ (\d+):(\S+)\/\d+}}/ )
 		{
 			plog ("  -> grep binded svc $1:$2 is client of $svcProc");
-			$hSvcProc{$svcPID} = int($1);
+			$hSvcProc{$svcPID} = int($1) if ($svcPID>0);
+		}
+		elsif ( $line  =~ /\s{4}createTime=\S+\slastActivity=(\S+)/)
+		{
+			plog ("     grep lastActivity $1 for $svcPID");
+			$hLastAct{$svcPID} = $1 if ($svcPID>0);
 		}
 		elsif ( $line =~ /Processes in Current Activity Manager State:/ )	{
 			$iPhase = 0;
-			$bDebugging = 0;
+			#$bDebugging = 1;
 			plog ("Found start sign");		
 		}
 	}
 	elsif ($iPhase == 0)
-	{		
-		if ($nPid==0 && $line =~ /\*APP\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
+	{	
+		#$bDebugging = 1;
+		if ($nPid==0 && $line =~ /\*(APP|PERS)\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
 		{
-			plog ("\n\t* process=$3\tUID=$1\tpid=$2\t/whatis?=$4");
-			$nPid=int($2);
+			plog ("\n\t* process=$4\tUID=$2\tpid=$3\t/whatis?=$5");
+			$nPid=int($3);
 			
-			push @aProc, $3;
-			push @aPID, int($2);
-			
-			#$hProc{$nPid} = $3;
-			
-								
-			#$maxLengProc = ($maxLengProc < length($3) ? length($3) : $maxLengProc);
+			push @aProc, $4;
+			push @aPID, $nPid;
 		}
 
 		elsif ($nPid>0 && $line =~ /\s+lastActivityTime=(\S+) lruWeight=(\S+) (.*)/ )
@@ -137,18 +155,17 @@ while ( my $line = <$HF> )
 			push @aLru, $2;
 			
 			$hLru{$nPid} = $2;
-			$hLastAct{$nPid} = $1;
+		#	$hLastAct{$nPid} = $1;		# lastActivityTime in Service record is more infortant
 		}
 		
 	#	elsif ($nPid==1 && $line =~ /\s+oom: max=(\d+) hidden=(\d+) curRaw=(\d+) setRaw=(\d+) cur=(\d+) set=(\d+)/ )
 		elsif ($nPid>0 && $line =~ /\s+oom: (.+)$/ )
 		{
 			plog ("\t\t oom=$1");
-			push @aStrOom, $1 ;
-			
+			push @aStrOom, $1 ;		
 			
 			# int($1) if ( $1 =~ /cur=(\d+)/ );			
-			$hCurAdj{$nPid} = int($1) if ( $1 =~ /cur=(\d+)/ );
+			$hCurAdj{$nPid} = int($1) if ( $1 =~ /cur=(\S+)/ );
 			plog ("\t\t CurAdj=$hCurAdj{$nPid}");
 			$nPid=0;
 		}
@@ -280,9 +297,9 @@ my $iOrder=1;
 $maxLengProc = 50;
 
 print "\n no  pid "; print " Process"; print " " foreach(6..$maxLengProc-1);
-print "Adjust type"; print " " foreach(11..$maxLengAdjType); print " cur  Pss    Lru   adj   last CPU time\n";
+print "Adjust type"; print " " foreach(11..$maxLengAdjType); print " cur  Pss    Lru    adj   last CPU time\n";
 print " -- ----- "; print "-" foreach(0..$maxLengProc-1);print " ";
-print "-" foreach(0..$maxLengAdjType); print " --- ---- -------- ----- ------------\n";
+print "-" foreach(0..$maxLengAdjType); print " --- ----- -------- ----- ------------\n";
 	
 while ( my $pid = shift @reOrder )
 {			
@@ -294,7 +311,7 @@ while ( my $pid = shift @reOrder )
 	#printf (" %5d %s",$hUid{$pid},$hAdjType{$pid});
 	print ("$hAdjType{$pid}");
 	print " " foreach(length($hAdjType{$pid})..$maxLengAdjType);	
-	defined($hCurAdj{$pid}) ? printf " %2d",$hCurAdj{$pid}: print "  -";
+	defined($hCurAdj{$pid}) ? printf " %3d",$hCurAdj{$pid}: print "  -";
 	defined($hPss{$pid}) ? printf " %5d",$hPss{$pid}: print "     -";
 	defined($hLru{$pid}) ? printf " %8d",$hLru{$pid}: print "     -   ";	
 	defined($hAdj{$pid}) ? printf " %s",$hAdj{$pid}: print "     -";
@@ -302,12 +319,12 @@ while ( my $pid = shift @reOrder )
 	defined($hLastAct{$pid}) ? printf "%s",$hLastAct{$pid}: print "   -";
 	my $nblank = defined($hLastAct{$pid})?( 15 - length($hLastAct{$pid}) ): 11 ;	
 	print " " foreach(0..$nblank);
-	if 		( defined($hPrvProc{$pid} ))	
+	if 		($bEnableFindClients>0 && defined($hPrvProc{$pid} ))	
 	{	
 		printf "\n\t* provier clients : %s",$hProc{$hPrvProc{$pid}};
 		defined($hCurAdj{$hPrvProc{$pid}})? printf "(%d)",$hCurAdj{$hPrvProc{$pid}} : print "(PERS)";
 	}
-	elsif 	( defined ($hSvcProc{$pid}))	
+	elsif 	($bEnableFindClients>0 && defined ($hSvcProc{$pid}))	
 	{	
 		printf "\n\t* service clients : %s",$hProc{$hSvcProc{$pid}};
 		defined($hCurAdj{$hSvcProc{$pid}})? printf "(%d)",$hCurAdj{$hSvcProc{$pid}} : print "(PERS)";
