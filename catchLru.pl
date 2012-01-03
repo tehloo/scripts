@@ -9,7 +9,8 @@ if ( ! @ARGV && isatty(*STDIN) ) {
     die "usage: ...";
 }
 
-my $bDebugging = 1;
+my $bDebugging = 0;
+my $bEnableFindClients = 0;		# find clients for contents provider & service
 my $HF;
 
 if (@ARGV)
@@ -43,7 +44,7 @@ my %hSumAdjType= ();
 
 
 #my %proc_info=();
-my $iPhase = -2;
+my $iPhase = -10;
 my $numProc=0;
 my $maxLengProc=0;
 my $maxLengAdjType=0;
@@ -58,17 +59,43 @@ my $bIsICS;
 
 my $svcProc = "";
 my $svcPID = -1;
+my %hPrvProc = ();
 my %hSvcProc = ();
+
+$iPhase = 0 if ($bEnableFindClients==0);
 
 while ( my $line = <$HF> )
 {
-	if ($iPhase == -2 )
+	if ($iPhase == -10 )
 	{
-		if ( $line =~ /Services in Current Activity Manager State:/ )	{
-			plog ("Found service state");
-			$iPhase = -1;
+		if ( $line =~ /Providers in Current Activity Manager State:/ )	{
+			plog ("Found provider state");
+			$iPhase = -2;
 		}
 	}
+	#	grep provider info.
+	elsif ($iPhase == -2 )
+	{
+		if ( $line =~ /\s{4}app=ProcessRecord{\S+\s(\d+):(\S+)\/\d+}/)
+		{
+			plog (" + meet provier $1 : $2");
+			$svcPID = $1;
+			$svcProc = $2;
+		}
+		elsif ( $line =~ /\s{4}clients=\[ProcessRecord{\S+ (\d+):(\S+)\/\d+}/ ) 
+		{
+			plog ("  -> grep binded provider $1 : $2 is client of $svcProc");
+			$hPrvProc{$svcPID} = int($1);
+		}
+		elsif ( $line =~ /Services in Current Activity Manager State:/ )	{
+			plog ("Found service state");
+			$iPhase = -1;
+			$svcPID = -1;
+			$svcProc = "";
+			$bDebugging = 0;
+		}		
+	}
+	#	grep service info.
 	elsif ($iPhase == -1 )
 	{	
 		if ( $line =~ /app=ProcessRecord{\S+ (\d+):(\S+)\/\d+}/)
@@ -275,7 +302,18 @@ while ( my $pid = shift @reOrder )
 	defined($hLastAct{$pid}) ? printf "%s",$hLastAct{$pid}: print "   -";
 	my $nblank = defined($hLastAct{$pid})?( 15 - length($hLastAct{$pid}) ): 11 ;	
 	print " " foreach(0..$nblank);
-	defined($hSvcProc{$pid}) ? printf "%s",$hProc{$hSvcProc{$pid}}: print "   -";
+	if 		( defined($hPrvProc{$pid} ))	
+	{	
+		printf "\n\t* provier clients : %s",$hProc{$hPrvProc{$pid}};
+		defined($hCurAdj{$hPrvProc{$pid}})? printf "(%d)",$hCurAdj{$hPrvProc{$pid}} : print "(PERS)";
+	}
+	elsif 	( defined ($hSvcProc{$pid}))	
+	{	
+		printf "\n\t* service clients : %s",$hProc{$hSvcProc{$pid}};
+		defined($hCurAdj{$hSvcProc{$pid}})? printf "(%d)",$hCurAdj{$hSvcProc{$pid}} : print "(PERS)";
+	}	
+	
+	#defined($hSvcProc{$pid}) ? printf "%s",$hProc{$hSvcProc{$pid}}: print "   -";
 	print "\n";
 }
 
