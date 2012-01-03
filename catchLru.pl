@@ -9,7 +9,7 @@ if ( ! @ARGV && isatty(*STDIN) ) {
     die "usage: ...";
 }
 
-my $bDebugging = 0;
+my $bDebugging = 1;
 my $HF;
 
 if (@ARGV)
@@ -43,7 +43,7 @@ my %hSumAdjType= ();
 
 
 #my %proc_info=();
-my $iPhase = 0;
+my $iPhase = -2;
 my $numProc=0;
 my $maxLengProc=0;
 my $maxLengAdjType=0;
@@ -56,15 +56,41 @@ my $TotalPssSum=0;
 my $countPhase2=0;
 my $bIsICS;
 
+my $svcProc = "";
+my $svcPID = -1;
+my %hSvcProc = ();
+
 while ( my $line = <$HF> )
-{		
-	if ($iPhase == 0)
+{
+	if ($iPhase == -2 )
 	{
-		if ( $line =~ /Processes in Current Activity Manager State:/ )	{
+		if ( $line =~ /Services in Current Activity Manager State:/ )	{
+			plog ("Found service state");
+			$iPhase = -1;
+		}
+	}
+	elsif ($iPhase == -1 )
+	{	
+		if ( $line =~ /app=ProcessRecord{\S+ (\d+):(\S+)\/\d+}/)
+		{
+			plog (" + meet svc $1 : $2");
+			$svcPID = $1;
+			$svcProc = $2;
+		}
+		elsif ( $line =~ /\s{6}\* Client AppBindRecord{\S+ ProcessRecord{\S+ (\d+):(\S+)\/\d+}}/ )
+		{
+			plog ("  -> grep binded svc $1:$2 is client of $svcProc");
+			$hSvcProc{$svcPID} = int($1);
+		}
+		elsif ( $line =~ /Processes in Current Activity Manager State:/ )	{
+			$iPhase = 0;
+			$bDebugging = 0;
 			plog ("Found start sign");		
 		}
-		
-		elsif ($nPid==0 && $line =~ /\*APP\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
+	}
+	elsif ($iPhase == 0)
+	{		
+		if ($nPid==0 && $line =~ /\*APP\* UID (\d+) ProcessRecord{\S+\s(\d+):(\S+)\/(\d+)/ )
 		{
 			plog ("\n\t* process=$3\tUID=$1\tpid=$2\t/whatis?=$4");
 			$nPid=int($2);
@@ -247,6 +273,9 @@ while ( my $pid = shift @reOrder )
 	defined($hAdj{$pid}) ? printf " %s",$hAdj{$pid}: print "     -";
 	print " " foreach(length($hAdj{$pid})..6);	
 	defined($hLastAct{$pid}) ? printf "%s",$hLastAct{$pid}: print "   -";
+	my $nblank = defined($hLastAct{$pid})?( 15 - length($hLastAct{$pid}) ): 11 ;	
+	print " " foreach(0..$nblank);
+	defined($hSvcProc{$pid}) ? printf "%s",$hProc{$hSvcProc{$pid}}: print "   -";
 	print "\n";
 }
 
