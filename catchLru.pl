@@ -10,7 +10,7 @@ if ( ! @ARGV && isatty(*STDIN) ) {
 }
 
 my $bDebugging = 0;
-my $bEnableFindClients = 1;		# find clients for contents provider & service
+my $bEnableFindClients = 0;		# find clients for contents provider & service
 my $HF;
 
 if (@ARGV)
@@ -68,7 +68,7 @@ while ( my $line = <$HF> )
 {
 	if ($iPhase == -10 )
 	{
-		if ( $line =~ /Providers in Current Activity Manager State:/ )	{
+		if ( $line =~ /Providers in Current Activity Manager State:/ || $line =~ /ACTIVITY MANAGER CONTENT PROVIDERS \(dumpsys activity providers\)/)	{
 			plog ("Found provider state");
 			$iPhase = -2;
 		}
@@ -90,22 +90,28 @@ while ( my $line = <$HF> )
 	{
 		if ( $line =~ /\s{4}app=ProcessRecord{\S+\s(\d+):(\S+)\/\d+}/)
 		{
-			plog (" + meet provier $1 : $2");
+			plog (" + meet provider $1 : $2");
+			$svcPID = $1;
+			$svcProc = $2;
+		}#/      proc=ProcessRecord{417bcbb0 445:android.process.acore\/10000}/
+		elsif ( $line =~ /\s{6}proc=ProcessRecord\{\S+\s(\d+):(\S+)\/\d+\}/ )
+		{
+			plog (" + meet provider $1 : $2");
 			$svcPID = $1;
 			$svcProc = $2;
 		}
 		elsif ( $line =~ /\s{4}clients=\[ProcessRecord{\S+ (\d+):(\S+)\/\d+}/ ) 
 		{
-			plog ("  -> grep binded provider $1 : $2 is client of $svcProc");
-			$hPrvProc{$svcPID} = int($1);
+			plog ("  -> grep binded provider $1 : $2 is client of $svcProc \($svcPID\)");
+			$hPrvProc{$svcPID} = int($1) if ($svcPID>-1);
 		}
-		elsif ( $line =~ /Services in Current Activity Manager State:/ )	{
+		elsif ( $line =~ /Services in Current Activity Manager State:/ || $line =~ /ACTIVITY MANAGER SERVICES \(dumpsys activity services\)/)	{
 			plog ("Found service state");
 			$iPhase = -1;
 			$svcPID = -1;
 			$svcProc = "";
 			#$bDebugging = 1;
-		}		
+		}
 	}
 	#	grep service info.
 	elsif ($iPhase == -1 )
@@ -131,7 +137,8 @@ while ( my $line = <$HF> )
 			plog ("     grep lastActivity $1 for $svcPID");
 			$hLastAct{$svcPID} = $1 if ($svcPID>0);
 		}
-		elsif ( $line =~ /Processes in Current Activity Manager State:/ )	{
+		elsif ( $line =~ /Processes in Current Activity Manager State:/ || $line =~ /ACTIVITY MANAGER RUNNING PROCESSES \(dumpsys activity processes\)/)	
+		{
 			$iPhase = 0;
 			#$bDebugging = 1;
 			plog ("Found start sign");		
