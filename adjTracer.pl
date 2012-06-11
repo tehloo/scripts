@@ -123,7 +123,7 @@ while ( my $line = <$HF> )
 		}
 		
 		# tracing adj.
-		elsif ( $line =~ /Set app (\S+) oom adj to (\d+)/ )
+		elsif ( $line =~ /Set app (\S+) oom adj to (\S+)/ )
 		{
 			#print "set ADJ of $1 to $2\n";
 			push @aProc, $1 if (!defined($hProcAdj{$1}));

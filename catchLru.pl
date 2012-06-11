@@ -59,8 +59,8 @@ my $bIsICS;
 
 my $svcProc = "";
 my $svcPID = -1;
-my %hPrvProc = ();
-my %hSvcProc = ();
+my %hClients = ();
+my @aClients = ();
 
 #$iPhase = 0 if ($bEnableFindClients==0);
 
@@ -100,11 +100,27 @@ while ( my $line = <$HF> )
 			$svcPID = $1;
 			$svcProc = $2;
 		}
+		elsif ( $line =~ /\s{4}clients=\[(.*)\]/ && ($svcPID>-1))
+		{		
+			my $str = $1;
+			my $SvcNum = defined($hClients{$svcPID}) ? $hClients{$svcPID}-1 :$#aClients;
+			my $index = 0;
+			
+			while ($str =~ /ProcessRecord{\S+\s(\d+):(\S+)\/\d+}/g) 
+			{							
+				$aClients[$SvcNum+1][$index] = $1;
+				plog ("      = $1:$2 \t| $#aClients/$index | $line");	
+				$index++;
+			}		
+			$hClients{$svcPID} = $#aClients;			
+		}
+=cut
 		elsif ( $line =~ /\s{4}clients=\[ProcessRecord{\S+ (\d+):(\S+)\/\d+}/ ) 
 		{
 			plog ("  -> grep binded provider $1 : $2 is client of $svcProc \($svcPID\)");
-			$hPrvProc{$svcPID} = int($1) if ($svcPID>-1);
+			$hClients{$svcPID} = int($1) if ($svcPID>-1);
 		}
+=cut		
 		elsif ( $line =~ /Services in Current Activity Manager State:/ || $line =~ /ACTIVITY MANAGER SERVICES \(dumpsys activity services\)/)	{
 			plog ("Found service state");
 			$iPhase = -1;
@@ -127,21 +143,32 @@ while ( my $line = <$HF> )
 			$svcPID = -1;
 			$svcProc = "";
 		}
-		elsif ( $line =~ /\s{6}\* Client AppBindRecord{\S+ ProcessRecord{\S+ (\d+):(\S+)\/\d+}}/ )
+		elsif ( $line =~ /\s{6}\* Client AppBindRecord{\S+ ProcessRecord{\S+ (\d+):(\S+)\/\d+}}/ && $svcPID > 0)
 		{
-			plog ("  -> grep binded svc $1:$2 is client of $svcProc");
-			$hSvcProc{$svcPID} = int($1) if ($svcPID>0);
+			plog ("  -> grep binded svc $1:$2 is client of $svcProc($svcPID)");
+			#$hClients{$svcPID} = int($1) if ($svcPID>0);	
+			my $SvcNum = defined($hClients{$svcPID}) ? $hClients{$svcPID} :($#aClients)+1;			
+			$aClients[$SvcNum][$#{$aClients[$SvcNum]}+1] = $1;
+			if ( defined($hClients{$svcPID}) )
+			{
+				plog ( "      = found previously saved hash item for $svcPID:$svcProc / $hClients{$svcPID} has $#{$aClients[$hClients{$svcPID}]}\n");
+			}
+			else {
+				$hClients{$svcPID} = $#aClients;
+				plog ("      = add new client $1:$2 for proc index $#aClients has $#{$aClients[$SvcNum]}");	
+			} 			
+			
 		}
 		elsif ( $line  =~ /\s{4}createTime=\S+\slastActivity=(\S+)/)
 		{
-			plog ("     grep lastActivity $1 for $svcPID");
+			#plog ("     grep lastActivity $1 for $svcPID");
 			$hLastAct{$svcPID} = $1 if ($svcPID>0);
 		}
 		elsif ( $line =~ /Processes in Current Activity Manager State:/ || $line =~ /ACTIVITY MANAGER RUNNING PROCESSES \(dumpsys activity processes\)/)	
 		{
 			$iPhase = 0;
-			#$bDebugging = 1;
-			plog ("Found start sign");		
+			#$bDebugging = 0;
+			plog ("Found start sign");	
 		}
 	}
 	elsif ($iPhase == 0)
@@ -201,7 +228,8 @@ while ( my $line = <$HF> )
 			plog (" lru list! - $1 $2 $3 $4 $5 $6 $7");
 			my $pid = int($4);
 			$cntPERS++ if ( $1 eq "PERS" );
-			if (!$bIsICS)
+#			if (!$bIsICS)
+			if (0)
 			{
 				if ( $2 == $cntStack ) {$cntStack++;}
 				else { print "\nSomething wrong!\n"; last; }	
@@ -326,18 +354,14 @@ while ( my $pid = shift @reOrder )
 	defined($hLastAct{$pid}) ? printf "%s",$hLastAct{$pid}: print "   -";
 	my $nblank = defined($hLastAct{$pid})?( 15 - length($hLastAct{$pid}) ): 11 ;	
 	print " " foreach(0..$nblank);
-	if 		($bEnableFindClients>0 && defined($hPrvProc{$pid} ))	
+	if 		($bEnableFindClients>0 && defined($hClients{$pid} ))	
 	{	
-		printf "\n\t* provier clients : %s",$hProc{$hPrvProc{$pid}};
-		defined($hCurAdj{$hPrvProc{$pid}})? printf "(%d)",$hCurAdj{$hPrvProc{$pid}} : print "(PERS)";
+		print "\n\tClients ";
+		print " $_:$hProc{$_} ($hCurAdj{$_})\n\t\t" foreach ( @{$aClients[$hClients{$pid}]} )		
+#		defined($hCurAdj{$hClients{$pid}})? printf "(%d)",$hCurAdj{$hClients{$pid}} : print "(PERS)";
 	}
-	elsif 	($bEnableFindClients>0 && defined ($hSvcProc{$pid}))	
-	{	
-		printf "\n\t* service clients : %s",$hProc{$hSvcProc{$pid}};
-		defined($hCurAdj{$hSvcProc{$pid}})? printf "(%d)",$hCurAdj{$hSvcProc{$pid}} : print "(PERS)";
-	}	
 	
-	#defined($hSvcProc{$pid}) ? printf "%s",$hProc{$hSvcProc{$pid}}: print "   -";
+	#defined($hClients{$pid}) ? printf "%s",$hProc{$hClients{$pid}}: print "   -";
 	print "\n";
 }
 

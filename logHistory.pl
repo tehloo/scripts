@@ -31,6 +31,8 @@ my %hCnt = ();
 my %hSvc = ();
 my %hEtc = ();
 
+my %hTrace = ();
+
 
 
 while ( my $line = <$HF> )
@@ -52,9 +54,8 @@ while ( my $line = <$HF> )
 			{
 				$proc = $1; $pid = $4; $task = "start_$2";				
 				if ( $2 eq "activity" ) 	{$hAct{$pid} = $time;}
-				elsif ( $2 eq "broadcast" ) {$hBrd{$pid} = $time;}
+				elsif ( $2 eq "broadcast" ) {$hBrd{$pid} = $time; $etc=$3;}
 				elsif ( $2 eq "service" ) 	{$hSvc{$pid} = $time;}
-				else 			{print "??"; $hEtc{$pid} = $time;}
 			}
 			elsif ( $line =~ /(\S+) for added application (\S+): pid=(\d+)/ )
 			{
@@ -63,12 +64,14 @@ while ( my $line = <$HF> )
 				$task = "start_added_app";
 				$hAdd{$pid} = $time;
 			}
+#01-18 10:01:39.799 I/ActivityManager(  209): Start proc android.process.media for content provider com.android.providers.media/.MediaProvider: pid=2392 uid=10024 gids={1015, 2001, 3003, 4002}			
 			elsif ( $line =~ /(\S+) for content provider (\S+): pid=(\d+)/ )
 			{
 				#print $count." $1($3) start_content_prov. $time\n";
 				$proc = $1; $pid = $3; 
 				$task = "start_content_prov.";
 				$hCnt{$pid} = $time;
+				$etc = $2;
 			}				
 		}
 
@@ -130,6 +133,27 @@ while ( my $line = <$HF> )
 			$etc = "";
 		}
 		
+		# trace force to -14
+		elsif ( $line =~ /Set app (\S+) oom adj to (\S+)/ )
+		{
+			my $adj = int($2);
+			if ( $adj == -14 && !(defined $hTrace{$1})) 
+			{				
+				$proc = "$1";
+				$task = "* force to -14 *";
+				$etc = "";			
+				$hTrace{$proc} = -14;
+			}
+			elsif ( defined $hTrace{$1} ) 
+			{
+				$proc = "$1";
+				$task = "* loose to $adj *";
+				$etc = "";
+				delete $hTrace{$proc};
+			}
+		}
+		
+		
 		#now show the result.
 		if ( $proc ne "" )
 		{
@@ -141,26 +165,7 @@ while ( my $line = <$HF> )
 			printf "%s ",$task;
 			print " " foreach(length($task)..$maxTaskLeng);	
 			printf "%s ",$time;
-			
-			
-			# stat. as "act 
-=cut
-			my $iAct = defined(%hAct) ? keys %hAct : 0;
-			my $iAdd = defined(%hAdd) ? keys %hAdd : 0;
-			my $iBrd = defined(%hBrd) ? keys %hBrd : 0;
-			my $iCnt = defined(%hCnt) ? keys %hCnt : 0;
-			my $iSvc = defined(%hSvc) ?	keys %hSvc : 0;
-			my $iEtc = defined(%hEtc) ?	keys %hEtc : 0;
-=cut
-			my $iAct = (%hAct) ? keys %hAct : 0;
-			my $iAdd = (%hAdd) ? keys %hAdd : 0;
-			my $iBrd = (%hBrd) ? keys %hBrd : 0;
-			my $iCnt = (%hCnt) ? keys %hCnt : 0;
-			my $iSvc = (%hSvc) ? keys %hSvc : 0;
-			my $iEtc = (%hEtc) ? keys %hEtc : 0;
-			
-#			printf " %2d %2d %2d %2d %2d %2d" ,$iAct, $iAdd, $iBrd, $iCnt, $iSvc, $iEtc;
-			
+				
 			# etc
 			printf " %s",$etc;
 			
