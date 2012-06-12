@@ -52,7 +52,7 @@ sub putResults
 	my @aIgnored = ();
 	
 	# write titles.
-	print "\n\n +++ RESULT +++\n\n";
+	print "\n\n +++ RESULT +++ ( start factor : $factorStart / factor count : $factorCount / ignore : $ignoreCount )\n\n";
 	print " Process"; print " " foreach(8..$lenLongestProc);
 	print "  Cnt. Avg.\t";
 	print "Under $factorStart\t";
@@ -63,12 +63,13 @@ sub putResults
 	foreach my $proc ( sort keys %hashProc) {	
 		if ($ignoreCount >= $results[ $hashProc{$proc} ][0] ) {		# IGNORE as given!
 			push @aIgnored, $proc;
+			$totalCount -= $results[ $hashProc{$proc} ][0];
 			next;
 		}
 		
 		my $checksum = 0;
 		my $idx = 2;
-		print "$proc : ";
+		print " $proc ";
 		print " " foreach (length($proc)..$lenLongestProc);		
 		
 		my $tCount = shift @{$results[ $hashProc{$proc} ]};
@@ -102,16 +103,17 @@ sub putResults
 	printf ("  %.1f%%\t",$aSummary[$_]*100/$aSummary[0]) foreach (2..$#aSummary);
 	
 	# show ignored process
-	if ($#aIgnored > 0)	{
-		print "\n - $#aIgnored processes ignored. (count)\n";
+	if ($#aIgnored >= 0)	{
+		print "\n - ".($#aIgnored+1)." processes ignored. (count)\n";
 		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aIgnored);
 	}
 		
 	# check result data.
+	print "\n\n";
 	if ($countAgain == $totalCount)
-	{	print "\n + $totalCount logs parsed and it all looks good!\n";	}
+	{	print " + $totalCount logs parsed and it all looks good!\n";	}
 	else
-	{	print "\n + Something's wrong!!! total parsed $totalCount. but result has $countAgain.\n";}
+	{	print " + Something's wrong!!! total parsed $totalCount. but result has $countAgain.\n";}
 	print " + $warning warnings. you'd better to check log above.\n" if ($warning > 0); 
 	print " + $error ERRORS! Something is wrong from PARSING phase.\n" if ($error > 0);	
 }
@@ -130,7 +132,7 @@ sub getLines
 {
 	open my $fh, "<", $_ or die "Cannot open file - $_";
 	my $count =0;
-	print "Parsing $_ ...";
+	print " - Parsing $_ ...";
 
 	while (my $line = <$fh> )
 	{
