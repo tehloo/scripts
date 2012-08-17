@@ -7,7 +7,7 @@ use Cwd 'abs_path';
 ###########################
 # OPTIONS. you can give whatever you want.
 #
-	my $factorStart = 3;		# under 3, 3~4, 4~5....
+	my $factorStart = 2;		# under 3, 3~4, 4~5....
 	my $factorCount = 5;		# how many columns...
 	my $ignoreCount = 1;		# ignore process data which has counted as given.
 
@@ -21,11 +21,17 @@ use Cwd 'abs_path';
 	my $warning = 0;			# it will count warning from parsing and count for summary.
 	my $lenLongestProc = 0;		# find longest process name for summary output format.
 
+	# variables for Loading time.
 	my %hashProc = ();			# key = proc / data = array index.
 	my @results = ();			# 2d array. 1st = count / 2nd = sum of duration / 3rd and further = count for each factors.
-
 	my $totalCount = 0;			# it will count logs for "Displayed time"
 	my $countAgain = 0;			# it will count every loading time counts to be compared with $totalCount.
+	
+	# variables for Resume rate.
+	my $launchedCount = 0;
+	my $restartedCount = 0;
+	my %hashLaunch = (); 		# key = proc / data = launch count.
+	my %hashStart = ();			# key = proc / data = start count.
 
 
 ###########################
@@ -34,8 +40,8 @@ use Cwd 'abs_path';
 	print "\n\n";
 	getFilename();							# get file list for MainLog from 'logger' dir.
 	getLines($_) foreach (@logfiles);		# read log lines from file array and parse each lines.
-	putResults();							# make summary from gathered datas.
-
+	resultLoadingTime();					# make summary from gathered datas.
+	resultResumeRate();
 #
 # job completed.
 ###########################
@@ -46,13 +52,13 @@ use Cwd 'abs_path';
 #
 
 # make summary from gathered datas.
-sub putResults
+sub resultLoadingTime
 {
 	my @aSummary = ();
 	my @aIgnored = ();
 	
 	# write titles.
-	print "\n\n +++ RESULT +++ ( start factor : $factorStart / factor count : $factorCount / ignore : $ignoreCount )\n\n";
+	print "\n\n +++ RESULT for Loading time +++ ( start factor : $factorStart / factor count : $factorCount / ignore : $ignoreCount )\n\n";
 	print " Process"; print " " foreach(8..$lenLongestProc);
 	print "  Cnt. Avg.\t";
 	print "Under $factorStart\t";
@@ -118,6 +124,40 @@ sub putResults
 	print " + $error ERRORS! Something is wrong from PARSING phase.\n" if ($error > 0);	
 }
 
+sub resultResumeRate
+{
+	# write titles.
+	print "\n\n +++ RESULT for Resume rate +++ \n\n";
+	print " Process"; print " " foreach(8..$lenLongestProc);
+	print " Launched  Started  Resumed   R.rate\n";
+	
+	foreach my $proc ( sort keys %hashLaunch)
+	{
+		my $launchCount = $hashLaunch{$proc};
+		my $startCount = defined( $hashStart{$proc} )? $hashStart{$proc}: 0;
+		print "\n $proc";
+		print " " foreach ( length($proc)..$lenLongestProc );
+		printf (" %6d",$launchCount);
+		printf (" %8d",$startCount);
+		printf (" %7d",$launchCount - $startCount);
+		printf (" %9.2f%%",($launchCount - $startCount)*100/$launchCount) if ($launchCount >0);
+	}
+	print "\n\n";
+=cut	
+	foreach my $proc ( sort keys %hashStart)
+	{
+		my $launchCount = defined( $hashLaunch{$proc} )? $hashLaunch{$proc} : 0;
+		my $startCount = defined( $hashStart{$proc} )? $hashStart{$proc}: 0;
+		print "\n $proc";
+		print " " foreach ( length($proc)..$lenLongestProc );
+		print "\t $launchCount";
+		print "\t $startCount";
+		printf ("\t %d",$launchCount - $startCount);
+		printf ("\t %f",($launchCount - $startCount)*100/$launchCount) if ($launchCount >0);
+	}
+=cut
+}
+
 # not used, but keep for reference.
 sub pushNumberOrZero
 {
@@ -130,13 +170,46 @@ sub pushNumberOrZero
 # get process name and loading time from log, and push to pushToHash() func.
 sub getLines
 {
+	my $job = 0;		# 0 : getLoadingTime / 1 : getResumeRate
+	$job = 1 if ($_ =~ /system\.log.*/);
+	
+	# for ResumeRate
+	my $justLaunched = "";
+	# for LoadingTime
+	
+	# end of variables
+	
+	
 	open my $fh, "<", $_ or die "Cannot open file - $_";
 	my $count =0;
 	print " - Parsing $_ ...";
 
 	while (my $line = <$fh> )
 	{
-		if ( $line =~ /.*(\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sDisplayed\s(\S+):\s(\+\S+ms)/ )
+		# count logs for Resume rate.
+		if ( $job > 0)
+		{			
+			if ( $line =~ /.*(\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=(\S+)}/ )
+			{	# Launched.
+				#print ("\n + $1 - LAUNCHED...$2..");					
+				pushToHashResume( $2, 0);
+				#print "000 - $1, $2\n";
+				$justLaunched = $1 if ( $2 =~ /(\S+)\/\S+/);	# get process name without activity name.			
+				#print "001 - $justLaunched\n";
+				$count++;
+			}
+			elsif ( $line =~ /.*(\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sStart proc\s(\S+)\sfor\sactivity\s(\S+):/ )
+			{	# it is restarted.				
+				#print "111 - $1, $2 - $line\n";
+				if ( $2 eq $justLaunched )
+				{
+					pushToHashResume( $3, 1);
+					#print "112 - $2 + $3\n";
+				}
+			}
+		}
+		# or count for Displayed time.
+		elsif ( $line =~ /.*(\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sDisplayed\s(\S+):\s(\+\S+ms)/ )
 		{
 			#print $1."-".$2." ".$3."\n";
 			my $proc = $2;
@@ -162,18 +235,56 @@ sub getLines
 			}
 			$count++;
 			
-			pushToHash ($proc, $durSec);
+			pushToHashDisplay ($proc, $durSec);
 		}
 	}
-	print "\tFound $count lines.\n";
+	print "\tFound $count ";
+	print "\"START...\"" if ($job==1);
+	print "\"Displayed...\"" if ($job==0);	
+	print " in lines.\n";
 	close $fh;
-	$totalCount += $count;
+	$totalCount += $count if ($job==0);
+	$launchedCount += $count if ($job==1);
 }
 
+# receive process name and flag (0=Launch/1=Start)
+sub pushToHashResume 
+{
+	my $proc = $_[0];
+	my $flag = $_[1];	
+	
+	if ( $flag == 0 )
+	{
+		$hashLaunch{$proc} 	= 0 if (!defined($hashLaunch{$proc}));
+		$hashLaunch{$proc}++ 	;
+#		print "0 $proc - $hashLaunch{$proc}\n";
+	}
+	if ( $flag == 1 )
+	{	
+		if (!defined($hashLaunch{$proc}))
+		{	## find with process name
+			my @split = split(/\//, $proc);
+#			print " \* $proc check $split[0].\n";
+			foreach( keys %hashLaunch )
+			{				
+				if ( $_ =~ /$split[0]/ )
+				{
+#					print " \* $proc seems like $_ \n";
+					$proc = $_;
+					last;
+				}
+			}
+		}
+		
+		$hashStart{$proc} 	= 0 if (!defined($hashStart{$proc}));
+		$hashStart{$proc}++;
+#		print "1 $proc - $hashStart{$proc}\n";
+	}
+}
 
 # receive process name and displayed time
 # initialize and build hash for proc name and array for data.
-sub pushToHash
+sub pushToHashDisplay
 {
 	my $proc = $_[0];
 	my $durSec = $_[1];
@@ -222,5 +333,6 @@ sub getFilename
 	# get MainLog files and push to logfiles array.
 	foreach (@files) {
 		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /main\.log.*/);
+		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /system\.log.*/);
 	}
 }
