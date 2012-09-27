@@ -59,6 +59,7 @@ use Time::Piece;
 	getFilename();							# get file list for MainLog from 'logger' dir.
 	getLines($_) foreach (@logfiles);		# read log lines from file array and parse each lines.
 	resultLoadingTime();					# make summary from gathered datas.
+
 #	resultResumeBySystem();
 #	resultResumeByEvent();
 #
@@ -83,7 +84,7 @@ sub setStartEndTime
 
 sub getLaunchCnt
 {
-	my $procAct = $_[0];
+	my $procAct = $_[0];	
 
 	if (!defined($hashLaunch{$procAct}))
 	{	## find with process name
@@ -93,14 +94,32 @@ sub getLaunchCnt
 		{				
 			if ( $_ =~ /$split[0]/ )
 			{
-#				print " \* $procAct seems like $_ \n";
+#				print "\n \* $procAct seems like $_ \n";
 				$procAct = $_;
 				last;
 			}
 		}
 	}
-	return $hashLaunch{$procAct};
+	my $return = 0;
+	if (defined($hashLaunch{$procAct}))
+	{
+		#	유사한 Process에 값이 적용될 수 있으니, 한번 return된건 해시 키를 삭제한다.
+		$return = delete $hashLaunch{$procAct};		
+	}
+	return $return;
 }
+
+sub remainedLC 
+{
+	print " - remained(not presented) Launch Process (Parsed from system log)\n";
+	foreach (sort keys %hashLaunch )
+	{
+		print " $_($hashLaunch{$_})\n";
+	}
+}
+
+
+
 # make summary from gathered datas.
 sub resultLoadingTime
 {
@@ -111,8 +130,8 @@ sub resultLoadingTime
 	# write titles.
 	print "\n\n +++ RESULT for Loading time +++ ( start factor : $factorStart / factor count : $factorCount / ignore : $ignoreCount )\n\n";
 	print " Process"; print " " foreach(8..$lenLongestProc);
-	print "  LD/LC.  Avg. ";
-	print "  0~$factorStart\t";
+	print "  LD/LC.  Avg.   ";
+	print "  0~$factorStart  ";
 	printf (" %d~%d  ",($_-1),$_) foreach ($factorStart+1..$factorStart+$factorCount-2);
 	print "Over ".($factorStart+$factorCount-1)."\n\n";
 	
@@ -134,8 +153,11 @@ sub resultLoadingTime
 		
 		my $tLaunchCnt = getLaunchCnt($proc);
 		
+		
 		# start to write real data.
-		printf ("%2d/%2d  %4.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
+		printf ("%2d/%2d  %5.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
+		print " " if (($tSum/$tCount) < 1000);
+		print " " if (($tSum/$tCount) < 10000);
 		$aSummary[0]+=$tCount;				# count.
 		$aSummary[1]+=$tSum;				# average.
 		$LaunchSum += $tLaunchCnt;
@@ -154,19 +176,21 @@ sub resultLoadingTime
 	print "\n";
 	print " " foreach (0..$lenLongestProc);	
 	print " $aSummary[0]/$LaunchSum ";
-	printf ("%.1f  ",$aSummary[1]/$aSummary[0]);
-	print "$aSummary[$_]    " foreach (2..$#aSummary);
+	printf ("%.1f   ",$aSummary[1]/$aSummary[0]);
+	printf (" %2d   ", $aSummary[$_]) foreach (2..$#aSummary);
 	
 	# show summary / AVG of displayed time.
 	print "\n";
 	print " " foreach (0..$lenLongestProc+15);
-	printf (" %.1f%%",$aSummary[$_]*100/$aSummary[0]) foreach (2..$#aSummary);
+	printf (" %.1f%% ",$aSummary[$_]*100/$aSummary[0]) foreach (2..$#aSummary);
 	
 	# show ignored process
 	if ($#aIgnored >= 0)	{
 		print "\n - ".($#aIgnored+1)." processes ignored. (count)\n";
 		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aIgnored);
 	}
+	
+	remainedLC();
 		
 	# check result data.
 	print "\n";
