@@ -89,33 +89,42 @@ sub setStartEndTime
 	$endTime = $timestamp if ($startTime eq "" || $endTime < $timestamp);
 }
 
-
-sub getLaunchCnt
+sub getAppropriateName
 {
-	my $procAct = $_[0];	
-
-	if (!defined($hashLaunch{$procAct}))
-	{	## find with process name
-		my @split = split(/\//, $procAct);
-#			print " \* $procAct check $split[0].\n";
-		foreach( keys %hashLaunch )
-		{				
-			if ( $_ =~ /$split[0]/ )
+	my $aFrom = $_[0];
+	my $proc = $_[1];
+	my $bGetHistory = $_[2];
+	
+	if (!defined($$aFrom{$proc}))
+	{
+#		print "\n *** find $proc .. ";
+		foreach my $procHash (keys %$aFrom)
+		{
+			my @split = split(/\//, $proc);
+			if ( $procHash =~ /$split[0]/ )
 			{
-#				print "\n \* $procAct seems like $_ \n";
-				if (!defined($assumedProcAct{$procAct})) {
-					$assumedProcAct{$_} = $procAct;
-					$assumedProcActMaxLen = $assumedProcActMaxLen < length($_) ? length($_) : $assumedProcActMaxLen;
+#				print "  --> seems like $procHash \n";
+				if ( $bGetHistory == 1 && !defined($assumedProcAct{$proc})) {
+					$assumedProcAct{$procHash} = $proc;
+					$assumedProcActMaxLen = $assumedProcActMaxLen < length($proc) ? length($proc) : $assumedProcActMaxLen;
 				}
-				else {
-					print "\n *** NOTE : $_ has already assumed name $assumedProcAct{$procAct}\n";
-				}
-				$procAct = $_;
+				$proc = $procHash;
 				last;
 			}
 		}
+#		print "\n";		
 	}
+	
+	return $proc;	 
+}
+
+
+sub getLaunchCnt
+{
+	my $procAct = $_[0];
 	my $return = 0;
+		
+	$procAct = getAppropriateName(\%hashLaunch, $procAct,0);	
 	if (defined($hashLaunch{$procAct}))
 	{
 		#	유사한 Process에 값이 적용될 수 있으니, 한번 return된건 해시 키를 삭제한다.
@@ -126,10 +135,11 @@ sub getLaunchCnt
 
 sub remainedLC 
 {
-	print " - remained(not presented) Launch Process (Parsed from system log)\n";
-	foreach (sort keys %hashLaunch )
+	return if (0 == keys %hashProc );
+	print "\n - remained(not presented) Launch Process (Parsed from system log)\n";
+	foreach (sort keys %hashProc )
 	{
-		print " $_($hashLaunch{$_})\n";
+		print " $_($hashProc{$_})\n";
 	}
 }
 
@@ -151,7 +161,8 @@ sub resultLoadingTime
 	print "Over ".($factorStart+$factorCount-1)."\n\n";
 	
 	# write results for each processes.
-	foreach my $proc ( sort keys %hashProc) 
+#	foreach my $proc ( sort keys %hashProc) 
+	foreach my $proc ( sort keys %hashLaunch)
 	{
 		my $tLaunchCnt = getLaunchCnt($proc);
 		if ($tLaunchCnt == 0) {										# skip process which is not launched by user.
@@ -159,7 +170,73 @@ sub resultLoadingTime
 			$totalCount -= $results[ $hashProc{$proc} ][0];			# result[procName][0] has Display Count for procName. 
 			next;
 		}
+
+		# get appropriate proc name;
+		if (!defined($hashProc{$proc}))	{
+#			print "\n   - $proc is ";
+			$proc = getAppropriateName(\%hashProc, $proc, 1 );
+#			print "$proc\n";
+		}
 		
+		# get index 
+		my $procIdx = delete $hashProc{$proc};
+		
+		my $checksum = 0;
+		my $idx = 2;
+		print " $proc ";
+		print " " foreach (length($proc)..$lenLongestProc);		
+
+
+		my $tCount = 0;
+		my $tSum = 0;
+		my $resumeCount = 0;
+				
+		if (defined($procIdx))
+		{
+			$tCount = shift @{$results[ $procIdx ]};
+			$tSum = shift @{$results[ $procIdx ]};
+		}
+		# add assumed resume time, if $assumeResumeTimeAs if over then 0
+		if ($assumeResumeTimeAs > 0)
+		{
+			$resumeCount = $tLaunchCnt - $tCount;
+			$tSum += $resumeCount*$assumeResumeTimeAs;
+		}		
+		
+		# start to write real data.
+		printf ("%2d/%2d ",$tCount, $tLaunchCnt);	
+		if ($tCount > 0) {
+			printf (" %5.1f  ", $tSum/$tCount);		
+			print " " if (($tSum/$tCount) < 1000);
+			print " " if (($tSum/$tCount) < 10000);
+			$aSummary[0]+=$tCount;				# count.
+			$aSummary[1]+=$tSum;				# average.
+			$LaunchSum += $tLaunchCnt;
+			foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
+				printf (" %2d   ", $_ );
+				$checksum+=$_;
+				$aSummary[$idx]+=$_; $idx++;
+			}
+		}
+		else {
+			if ($assumeResumeTimeAs > 0)
+			{	print "  $assumeResumeTimeAs.0 (as the option)  "; }
+			else
+			{	print "   --- N/A ---";}
+		}
+
+	
+		#check count and sum
+		print " (OK)\n" if ( $checksum == $tCount );
+		$countAgain+=$checksum;
+	}
+	
+	putSummary(\@aSummary, $LaunchSum, "summary for above");	
+	
+		
+	print "\n - Processes which have not launched by USER\n";
+		
+	foreach my $proc ( sort keys %hashProc) {
 		my $procIdx = delete $hashProc{$proc};
 		my $checksum = 0;
 		my $idx = 2;
@@ -169,12 +246,8 @@ sub resultLoadingTime
 		my $tCount = shift @{$results[ $procIdx ]};
 		my $tSum = shift @{$results[ $procIdx ]};
 		
-		# add assumed resume time, if $assumeResumeTimeAs if over then 0
-		if ($assumeResumeTimeAs > 0)
-		{
-			my $resumeCount = $tLaunchCnt - $tCount;
-			$tSum += $resumeCount*$assumeResumeTimeAs;
-		}		
+		my $tLaunchCnt = getLaunchCnt($proc);
+		
 		
 		# start to write real data.
 		printf ("%2d/%2d  %5.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
@@ -194,40 +267,6 @@ sub resultLoadingTime
 		$countAgain+=$checksum;
 	}
 	
-	putSummary(\@aSummary, $LaunchSum, "summary for above");	
-	
-	print "\n - Processes which have not launched by USER\n";
-	
-	foreach my $proc ( sort keys %hashProc) {
-		my $procIdx = $hashProc{$proc};
-		my $checksum = 0;
-		my $idx = 2;
-		print " $proc ";
-		print " " foreach (length($proc)..$lenLongestProc);		
-		
-		my $tCount = shift @{$results[ $procIdx ]};
-		my $tSum = shift @{$results[ $procIdx ]};
-		
-		my $tLaunchCnt = getLaunchCnt($proc);
-		
-		
-		# start to write real data.
-		printf ("%2d/%2d  %5.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
-		print " " if (($tSum/$tCount) < 1000);
-		print " " if (($tSum/$tCount) < 10000);
-		$aSummary[0]+=$tCount;				# count.
-		$aSummary[1]+=$tSum;				# average.
-		$LaunchSum += $tLaunchCnt;
-		foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
-			printf (" %2d   ", $_ );
-			$checksum+=$_;
-			$aSummary[$idx]+=$_; $idx++;
-		}
-	
-		#check count and sum
-		print " (OK)\n" if ( $checksum == $tCount );
-	}
-	
 =cut	
 	# show ignored process
 	if ($#aNoUserLaunched >= 0)	{
@@ -235,17 +274,19 @@ sub resultLoadingTime
 		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aNoUserLaunched);
 	}
 =cut	
-#	remainedLC();
+	
 
 	putSummary(\@aSummary, $LaunchSum, "summary for all");
+
+	remainedLC();
 		
 	# put assumed processes
 	print "\n\n - Assumed processes (Launch A, but Displayed as B)\n";
 	foreach my $assumedProc ( sort keys %assumedProcAct )
-	{
-		print " $assumedProc";
-		print " " foreach (length($assumedProc)..$assumedProcActMaxLen);		
-		print "-> $assumedProcAct{$assumedProc}\n";
+	{		
+		print " $assumedProcAct{$assumedProc}";
+		print " " foreach (length($assumedProcAct{$assumedProc})..$assumedProcActMaxLen);		
+		print " -> $assumedProc\n";
 	}
 		
 	# check result data.
