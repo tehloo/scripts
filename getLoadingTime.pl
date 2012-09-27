@@ -10,8 +10,9 @@ use Time::Piece;
 #
 	my $factorStart = 2;		# under 3, 3~4, 4~5....
 	my $factorCount = 5;		# how many columns...
-	my $ignoreCount = 1;		# ignore process data which has counted as given.
+#	my $ignoreCount = 0;		# ignore process data which has counted as given.
 	my $dpTimeToFile = 1;		# option : saving text file for Displayed time.
+	my $assumeResumeTimeAs = 200;		# 
 
 	
 ###########################
@@ -51,6 +52,13 @@ use Time::Piece;
 		print $output_fh "log_time process.activity displayed_time";
 		close $output_fh;	
 	}
+	
+	# as reference, Assumed Proc/Act name which is not matched exactly.
+	my %assumedProcAct = ();
+	my $assumedProcActMaxLen = 0;
+	
+	# if a argument has given, it will be the path of log files.
+	$path = $ARGV[0] if ($#ARGV == 0);
 
 ###########################
 # now we go.
@@ -89,12 +97,19 @@ sub getLaunchCnt
 	if (!defined($hashLaunch{$procAct}))
 	{	## find with process name
 		my @split = split(/\//, $procAct);
-#			print " \* $proc check $split[0].\n";
+#			print " \* $procAct check $split[0].\n";
 		foreach( keys %hashLaunch )
 		{				
 			if ( $_ =~ /$split[0]/ )
 			{
 #				print "\n \* $procAct seems like $_ \n";
+				if (!defined($assumedProcAct{$procAct})) {
+					$assumedProcAct{$_} = $procAct;
+					$assumedProcActMaxLen = $assumedProcActMaxLen < length($_) ? length($_) : $assumedProcActMaxLen;
+				}
+				else {
+					print "\n *** NOTE : $_ has already assumed name $assumedProcAct{$procAct}\n";
+				}
 				$procAct = $_;
 				last;
 			}
@@ -119,37 +134,79 @@ sub remainedLC
 }
 
 
-
 # make summary from gathered datas.
 sub resultLoadingTime
 {
 	my @aSummary = ();
-	my @aIgnored = ();
+	my @aNoUserLaunched = ();
 	my $LaunchSum = 0;
 	
 	# write titles.
-	print "\n\n +++ RESULT for Loading time +++ ( start factor : $factorStart / factor count : $factorCount / ignore : $ignoreCount )\n\n";
-	print " Process"; print " " foreach(8..$lenLongestProc);
+	print "\n\n\n +++ RESULT for Loading time +++ ( start factor : $factorStart / factor count : $factorCount )\n";
+	print "     Resume time has assumed as $assumeResumeTimeAs, and it will be involved into Average Loading time\n" if ($assumeResumeTimeAs>0);  
+	print "\n Process"; print " " foreach(8..$lenLongestProc);
 	print "  LD/LC.  Avg.   ";
 	print "  0~$factorStart  ";
 	printf (" %d~%d  ",($_-1),$_) foreach ($factorStart+1..$factorStart+$factorCount-2);
 	print "Over ".($factorStart+$factorCount-1)."\n\n";
 	
-	# write data.
-	foreach my $proc ( sort keys %hashProc) {	
-		if ($ignoreCount >= $results[ $hashProc{$proc} ][0] ) {		# IGNORE as given!
-			push @aIgnored, $proc;
-			$totalCount -= $results[ $hashProc{$proc} ][0];
+	# write results for each processes.
+	foreach my $proc ( sort keys %hashProc) 
+	{
+		my $tLaunchCnt = getLaunchCnt($proc);
+		if ($tLaunchCnt == 0) {										# skip process which is not launched by user.
+			push @aNoUserLaunched, $proc;
+			$totalCount -= $results[ $hashProc{$proc} ][0];			# result[procName][0] has Display Count for procName. 
 			next;
 		}
 		
+		my $procIdx = delete $hashProc{$proc};
 		my $checksum = 0;
 		my $idx = 2;
 		print " $proc ";
 		print " " foreach (length($proc)..$lenLongestProc);		
 		
-		my $tCount = shift @{$results[ $hashProc{$proc} ]};
-		my $tSum = shift @{$results[ $hashProc{$proc} ]};
+		my $tCount = shift @{$results[ $procIdx ]};
+		my $tSum = shift @{$results[ $procIdx ]};
+		
+		# add assumed resume time, if $assumeResumeTimeAs if over then 0
+		if ($assumeResumeTimeAs > 0)
+		{
+			my $resumeCount = $tLaunchCnt - $tCount;
+			$tSum += $resumeCount*$assumeResumeTimeAs;
+		}		
+		
+		# start to write real data.
+		printf ("%2d/%2d  %5.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
+		print " " if (($tSum/$tCount) < 1000);
+		print " " if (($tSum/$tCount) < 10000);
+		$aSummary[0]+=$tCount;				# count.
+		$aSummary[1]+=$tSum;				# average.
+		$LaunchSum += $tLaunchCnt;
+		foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
+			printf (" %2d   ", $_ );
+			$checksum+=$_;
+			$aSummary[$idx]+=$_; $idx++;
+		}
+	
+		#check count and sum
+		print " (OK)\n" if ( $checksum == $tCount );
+		$countAgain+=$checksum;
+	}
+	
+	putSummary(\@aSummary, $LaunchSum, "summary for above");	
+	
+	print "\n - Processes which have not launched by USER\n";
+	
+	foreach my $proc ( sort keys %hashProc) {
+		my $procIdx = $hashProc{$proc};
+		my $checksum = 0;
+		my $idx = 2;
+		print " $proc ";
+		print " " foreach (length($proc)..$lenLongestProc);		
+		
+		my $tCount = shift @{$results[ $procIdx ]};
+		my $tSum = shift @{$results[ $procIdx ]};
 		
 		my $tLaunchCnt = getLaunchCnt($proc);
 		
@@ -161,7 +218,7 @@ sub resultLoadingTime
 		$aSummary[0]+=$tCount;				# count.
 		$aSummary[1]+=$tSum;				# average.
 		$LaunchSum += $tLaunchCnt;
-		foreach (@{$results[ $hashProc{$proc} ]}) {							# ... and each datas.
+		foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
 			printf (" %2d   ", $_ );
 			$checksum+=$_;
 			$aSummary[$idx]+=$_; $idx++;
@@ -169,28 +226,27 @@ sub resultLoadingTime
 	
 		#check count and sum
 		print " (OK)\n" if ( $checksum == $tCount );
-		$countAgain+=$checksum;
 	}
 	
-	# show summary / SUM of count	
-	print "\n";
-	print " " foreach (0..$lenLongestProc);	
-	print " $aSummary[0]/$LaunchSum ";
-	printf ("%.1f   ",$aSummary[1]/$aSummary[0]);
-	printf (" %2d   ", $aSummary[$_]) foreach (2..$#aSummary);
-	
-	# show summary / AVG of displayed time.
-	print "\n";
-	print " " foreach (0..$lenLongestProc+15);
-	printf (" %.1f%% ",$aSummary[$_]*100/$aSummary[0]) foreach (2..$#aSummary);
-	
+=cut	
 	# show ignored process
-	if ($#aIgnored >= 0)	{
-		print "\n - ".($#aIgnored+1)." processes ignored. (count)\n";
-		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aIgnored);
+	if ($#aNoUserLaunched >= 0)	{
+		print "\n - ".($#aNoUserLaunched+1)." processes ignored. (count)\n";
+		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aNoUserLaunched);
 	}
-	
-	remainedLC();
+=cut	
+#	remainedLC();
+
+	putSummary(\@aSummary, $LaunchSum, "summary for all");
+		
+	# put assumed processes
+	print "\n\n - Assumed processes (Launch A, but Displayed as B)\n";
+	foreach my $assumedProc ( sort keys %assumedProcAct )
+	{
+		print " $assumedProc";
+		print " " foreach (length($assumedProc)..$assumedProcActMaxLen);		
+		print "-> $assumedProcAct{$assumedProc}\n";
+	}
 		
 	# check result data.
 	print "\n";
@@ -207,6 +263,25 @@ sub resultLoadingTime
 	print $startTime->strftime($strformat); print " to "; print $endTime->strftime($strformat); 
 	$startTime = $endTime -$startTime;
 	printf " - %d days, %d hours, %d minutes and %d seconds )\n\n",(gmtime $startTime->seconds)[7,2,1,0];
+}
+
+sub putSummary
+{
+	my $aSummary = $_[0];
+	my $LaunchSum = $_[1];
+	my $nameSummary = $_[2];
+	
+	# show summary / SUM of count	
+	print "\n $nameSummary";
+	print " " foreach (length($nameSummary)..$lenLongestProc);	
+	print " @$aSummary[0]/$LaunchSum ";
+	printf ("%.1f   ",@$aSummary[1]/@$aSummary[0]);
+	printf (" %2d   ", @$aSummary[$_]) foreach (2..$#$aSummary);
+	
+	# show summary / AVG of displayed time.
+	print "\n";
+	print " " foreach (0..$lenLongestProc+15);
+	printf (" %.1f%% ",@$aSummary[$_]*100/@$aSummary[0]) foreach (2..$#$aSummary);
 }
 
 # not used, but keep for reference.
@@ -465,7 +540,7 @@ sub pushToHashDisplay
 # build array only for MainLog.
 sub getFilename 
 {
-	opendir(dirHandle, $path) || die "Failed opening.\n";
+	opendir(dirHandle, $path) || die "Failed to open. check the path : \\$path";
 	my @files = readdir( dirHandle );	# get every files from dirHandle.
 	closedir dirHandle;  # ²À ´ÝÀ¾...
 
