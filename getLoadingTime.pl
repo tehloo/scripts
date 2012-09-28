@@ -12,7 +12,7 @@ use Time::Piece;
 	my $factorCount = 5;		# how many columns...
 #	my $ignoreCount = 0;		# ignore process data which has counted as given.
 	my $dpTimeToFile = 1;		# option : saving text file for Displayed time.
-	my $assumeResumeTimeAs = 200;		# 
+	my $assumeResumeTimeAs = 250;		# 
 
 	
 ###########################
@@ -136,11 +136,77 @@ sub getLaunchCnt
 sub remainedLC 
 {
 	return if (0 == keys %hashProc );
-	print "\n - remained(not presented) Launch Process (Parsed from system log)\n";
+	print "\n - remained(not presented) loaded process info (from main log)\n";
 	foreach (sort keys %hashProc )
 	{
 		print " $_($hashProc{$_})\n";
 	}
+}
+
+sub putOneRecord
+{
+	my $proc = $_[0];
+	my $tLaunchCnt = $_[1];
+	my $aSummary = $_[2];
+	
+	# get index 
+	my $procIdx = delete $hashProc{$proc};
+		
+
+	my $checksum = 0;
+	my $idx = 2;
+	print " $proc ";
+	print " " foreach (length($proc)..$lenLongestProc);		
+
+
+	my $tCount = 0;
+	my $tSum = 0;
+	my $tAvg = 0;
+	my $aRef = 0;
+			
+	if (defined($procIdx))
+	{
+		$tCount = shift @{$results[ $procIdx ]};
+		$tSum = shift @{$results[ $procIdx ]};
+		$tAvg = $tSum/$tCount;
+		$aRef = $results[ $procIdx ];
+	}				
+	
+	# start to write real data.
+	printf ("%2d / %2d ",$tCount, $tLaunchCnt);	
+		
+	print " " if ($tAvg < 1000);
+	print " " if ($tAvg < 10000);
+	printf (" %5.1f  ", $tAvg);	
+	@$aSummary[0]+=$tCount;				# count.
+	@$aSummary[1]+=$tSum;				# average.
+
+	foreach (1..$factorCount)
+	{
+		my $iVal = shift @{$aRef} if $aRef > 0;
+		if (defined($iVal)) {
+			printf(" %2d   ", $iVal );
+			$checksum+=$iVal;
+			@$aSummary[$idx]+=$iVal; $idx++;
+		}
+		else {
+			print  "  -   ";
+		}
+	}
+	
+	# add assumed resume time, if $assumeResumeTimeAs if over then 0
+	if ($assumeResumeTimeAs > 0)
+	{
+		my $assumedCnt = ($tCount > $tLaunchCnt)? $tCount : $tLaunchCnt;
+		my $resumedCnt = ($tCount > $tLaunchCnt)? 0 : $tLaunchCnt-$tCount;
+		my $assumedAvg = ($tSum + $resumedCnt*$assumeResumeTimeAs)/$assumedCnt;
+		print " " if $assumedAvg < 1000;			
+		printf "%5.1f",$assumedAvg ;
+	}
+
+	#check count and sum
+	print " ... OK\n" if ( $checksum == $tCount );
+	$countAgain+=$checksum;
 }
 
 
@@ -176,108 +242,20 @@ sub resultLoadingTime
 #			print "\n   - $proc is ";
 			$proc = getAppropriateName(\%hashProc, $proc, 1 );
 #			print "$proc\n";
-		}
-		
-		# get index 
-		my $procIdx = delete $hashProc{$proc};
-		
-		my $checksum = 0;
-		my $idx = 2;
-		print " $proc ";
-		print " " foreach (length($proc)..$lenLongestProc);		
+		}	
 
-
-		my $tCount = 0;
-		my $tSum = 0;
-		my $resumeCount = 0;
-				
-		if (defined($procIdx))
-		{
-			$tCount = shift @{$results[ $procIdx ]};
-			$tSum = shift @{$results[ $procIdx ]};
-		}
-		# add assumed resume time, if $assumeResumeTimeAs if over then 0
-		if ($assumeResumeTimeAs > 0)
-		{
-			$resumeCount = $tLaunchCnt - $tCount;
-			$tSum += $resumeCount*$assumeResumeTimeAs;
-		}		
-		
-		# start to write real data.
-		printf ("%2d/%2d ",$tCount, $tLaunchCnt);	
-		if ($tCount > 0) {
-			printf (" %5.1f  ", $tSum/$tCount);		
-			print " " if (($tSum/$tCount) < 1000);
-			print " " if (($tSum/$tCount) < 10000);
-			$aSummary[0]+=$tCount;				# count.
-			$aSummary[1]+=$tSum;				# average.
-			$LaunchSum += $tLaunchCnt;
-			foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
-				printf (" %2d   ", $_ );
-				$checksum+=$_;
-				$aSummary[$idx]+=$_; $idx++;
-			}
-		}
-		else {
-			if ($assumeResumeTimeAs > 0)
-			{	print "  $assumeResumeTimeAs.0 (as the option)  "; }
-			else
-			{	print "   --- N/A ---";}
-		}
-
-	
-		#check count and sum
-		print " (OK)\n" if ( $checksum == $tCount );
-		$countAgain+=$checksum;
-	}
-	
-	putSummary(\@aSummary, $LaunchSum, "summary for above");	
-	
-		
-	print "\n - Processes which have not launched by USER\n";
-		
+		putOneRecord($proc, $tLaunchCnt, \@aSummary);
+		$LaunchSum += $tLaunchCnt;		
+	}	
+	putSummary(\@aSummary, $LaunchSum, "summary for above");
+			
+	print "\n - Processes which is NOT launched by user\n";		
 	foreach my $proc ( sort keys %hashProc) {
-		my $procIdx = delete $hashProc{$proc};
-		my $checksum = 0;
-		my $idx = 2;
-		print " $proc ";
-		print " " foreach (length($proc)..$lenLongestProc);		
-		
-		my $tCount = shift @{$results[ $procIdx ]};
-		my $tSum = shift @{$results[ $procIdx ]};
-		
 		my $tLaunchCnt = getLaunchCnt($proc);
-		
-		
-		# start to write real data.
-		printf ("%2d/%2d  %5.1f  ",$tCount, $tLaunchCnt, $tSum/$tCount);
-		print " " if (($tSum/$tCount) < 1000);
-		print " " if (($tSum/$tCount) < 10000);
-		$aSummary[0]+=$tCount;				# count.
-		$aSummary[1]+=$tSum;				# average.
+		putOneRecord($proc, $tLaunchCnt, \@aSummary);
 		$LaunchSum += $tLaunchCnt;
-		foreach (@{$results[ $procIdx ]}) {							# ... and each datas.
-			printf (" %2d   ", $_ );
-			$checksum+=$_;
-			$aSummary[$idx]+=$_; $idx++;
-		}
-	
-		#check count and sum
-		print " (OK)\n" if ( $checksum == $tCount );
-		$countAgain+=$checksum;
 	}
-	
-=cut	
-	# show ignored process
-	if ($#aNoUserLaunched >= 0)	{
-		print "\n - ".($#aNoUserLaunched+1)." processes ignored. (count)\n";
-		printf (" %s (%d)\n", $_, $results[ $hashProc{$_} ][0])foreach (@aNoUserLaunched);
-	}
-=cut	
-	
-
 	putSummary(\@aSummary, $LaunchSum, "summary for all");
-
 	remainedLC();
 		
 	# put assumed processes
@@ -315,9 +293,9 @@ sub putSummary
 	# show summary / SUM of count	
 	print "\n $nameSummary";
 	print " " foreach (length($nameSummary)..$lenLongestProc);	
-	print " @$aSummary[0]/$LaunchSum ";
-	printf ("%.1f   ",@$aSummary[1]/@$aSummary[0]);
-	printf (" %2d   ", @$aSummary[$_]) foreach (2..$#$aSummary);
+	print "@$aSummary[0]/$LaunchSum ";
+	printf (" %.1f  ",@$aSummary[1]/@$aSummary[0]);
+	printf ("%3d   ", @$aSummary[$_]) foreach (2..$#$aSummary);
 	
 	# show summary / AVG of displayed time.
 	print "\n";
@@ -477,22 +455,6 @@ sub pushToHashEvent
 	}
 	if ( $flag == 1 )
 	{	
-=cut		
-		if (!defined($hashLaunchEvent{$proc}))
-		{	## find with process name
-			my @split = split(/\//, $proc);
-#			print " \* $proc check $split[0].\n";
-			foreach( keys %hashLaunchEvent )
-			{				
-				if ( $_ =~ /$split[0]/ )
-				{
-#					print " \* $proc seems like $_ \n";
-					$proc = $_;
-					last;
-				}
-			}
-		}
-=cut		
 		$hashResume{$proc} 	= 0 if (!defined($hashResume{$proc}));
 		$hashResume{$proc}++;
 #		print "1 $proc - $hashStart{$proc}\n";
@@ -515,22 +477,6 @@ sub pushToHashResume
 	}
 	if ( $flag == 1 )
 	{
-=cut	
-		if (!defined($hashLaunch{$proc}))
-		{	## find with process name
-			my @split = split(/\//, $proc);
-#			print " \* $proc check $split[0].\n";
-			foreach( keys %hashLaunch )
-			{				
-				if ( $_ =~ /$split[0]/ )
-				{
-#					print " \* $proc seems like $_ \n";
-					$proc = $_;
-					last;
-				}
-			}
-		}
-=cut		
 		$hashStart{$proc} 	= 0 if (!defined($hashStart{$proc}));
 		$hashStart{$proc}++;
 #		print "1 $proc - $hashStart{$proc}\n";
