@@ -12,7 +12,9 @@ use Time::Piece;
 	my $factorCount = 5;		# how many columns...
 #	my $ignoreCount = 0;		# ignore process data which has counted as given.
 	my $dpTimeToFile = 1;		# option : saving text file for Displayed time.
-	my $assumeResumeTimeAs = 250;		# 
+	my $assumeResumeTimeAs = 100;		#
+	my $opGetAssumedResult = 1;		# 
+	my $opIgnoreProcName = "com.nhn.android.search";
 
 	
 ###########################
@@ -29,8 +31,12 @@ use Time::Piece;
 	my @results = ();			# 2d array. 1st = count / 2nd = sum of duration / 3rd and further = count for each factors.
 	my $totalCount = 0;			# it will count logs for "Displayed time"
 	my $countAgain = 0;			# it will count every loading time counts to be compared with $totalCount.
-	my $startTime = "";
-	my $endTime = "";
+	my $startTime = 0;
+	my $endTime = 0;
+	
+	my $startTime2 = 0;
+	my $endTime2 = 0;
+	
 	
 	# variables for Resume rate by system log
 	my $launchedCount = 0;
@@ -148,6 +154,7 @@ sub putOneRecord
 	my $proc = $_[0];
 	my $tLaunchCnt = $_[1];
 	my $aSummary = $_[2];
+	my $aAsSum = $_[3];
 	
 	# get index 
 	my $procIdx = delete $hashProc{$proc};
@@ -173,25 +180,45 @@ sub putOneRecord
 	}				
 	
 	# start to write real data.
-	printf ("%2d / %2d ",$tCount, $tLaunchCnt);	
+	printf ("%3d  %3d",$tCount, $tLaunchCnt);	
 		
 	print " " if ($tAvg < 1000);
 	print " " if ($tAvg < 10000);
 	printf (" %5.1f  ", $tAvg);	
 	@$aSummary[0]+=$tCount;				# count.
 	@$aSummary[1]+=$tSum;				# average.
+	
+	@$aAsSum[0]+=$tLaunchCnt;			# count. 	(but useless)
+#	@$aAsSum[1]+=$tSum;					# average.	(but useless)
 
 	foreach (1..$factorCount)
 	{
 		my $iVal = shift @{$aRef} if $aRef > 0;
+		my $index = $_;
 		if (defined($iVal)) {
-			printf(" %2d   ", $iVal );
+			printf(" %3d  ", $iVal );
 			$checksum+=$iVal;
-			@$aSummary[$idx]+=$iVal; $idx++;
+			@$aAsSum[$idx] += $iVal if ($tLaunchCnt > 0);
+			@$aSummary[$idx]+=$iVal; 
 		}
 		else {
 			print  "  -   ";
 		}
+		
+		#			if ($index == 1 )	# TODO: SHOULD BE FIXED LATER.
+		my $addAssume = 0;
+		$addAssume++ if ($index == 1 && $assumeResumeTimeAs <= $factorStart * 1000);
+		$addAssume++ if ($index > 1 && 
+							$assumeResumeTimeAs > ($factorStart+$index-2) * 1000 &&
+							$assumeResumeTimeAs <= ($factorStart+$index-1) * 1000);
+		$addAssume++ if ($index == $factorCount && 
+							$assumeResumeTimeAs >= ($factorStart+$index-1) * 1000);
+		if ($addAssume > 0 && $assumeResumeTimeAs > 0) {
+			@$aAsSum[$idx] += ($tLaunchCnt-$tCount ) if ($tLaunchCnt>$tCount);
+#			print "(+@$aAsSum[$idx]) ";
+		}
+		
+		$idx++ if (defined($iVal));
 	}
 	
 	# add assumed resume time, if $assumeResumeTimeAs if over then 0
@@ -202,11 +229,17 @@ sub putOneRecord
 		my $assumedAvg = ($tSum + $resumedCnt*$assumeResumeTimeAs)/$assumedCnt;
 		print " " if $assumedAvg < 1000;			
 		printf "%5.1f",$assumedAvg ;
+		@$aAsSum[1]+=($assumedAvg*$assumedCnt);
+		
+#		printf( " %d %d(%d)", $tSum, @$aAsSum[1],$resumedCnt);
 	}
+#	printf( " (%3d) ", $tLaunchCnt-$tCount);
 
 	#check count and sum
-	print " ... OK\n" if ( $checksum == $tCount );
+	print " NOK!" if ( $checksum != $tCount );
 	$countAgain+=$checksum;
+
+	print "\n";
 }
 
 
@@ -216,15 +249,16 @@ sub resultLoadingTime
 	my @aSummary = ();
 	my @aNoUserLaunched = ();
 	my $LaunchSum = 0;
+	my @aAsSum = ();
 	
 	# write titles.
 	print "\n\n\n +++ RESULT for Loading time +++ ( start factor : $factorStart / factor count : $factorCount )\n";
 	print "     Resume time has assumed as $assumeResumeTimeAs, and it will be involved into Average Loading time\n" if ($assumeResumeTimeAs>0);  
 	print "\n Process"; print " " foreach(8..$lenLongestProc);
-	print "  LD/LC.  Avg.   ";
-	print "  0~$factorStart  ";
+	print " Load Launch Avg.  ";
+	print " 0~$factorStart   ";
 	printf (" %d~%d  ",($_-1),$_) foreach ($factorStart+1..$factorStart+$factorCount-2);
-	print "Over ".($factorStart+$factorCount-1)."\n\n";
+	print " over".($factorStart+$factorCount-1)."\n\n";
 	
 	# write results for each processes.
 #	foreach my $proc ( sort keys %hashProc) 
@@ -244,18 +278,20 @@ sub resultLoadingTime
 #			print "$proc\n";
 		}	
 
-		putOneRecord($proc, $tLaunchCnt, \@aSummary);
+		putOneRecord($proc, $tLaunchCnt, \@aSummary, \@aAsSum);
 		$LaunchSum += $tLaunchCnt;		
 	}	
 	putSummary(\@aSummary, $LaunchSum, "summary for above");
+	putSummary(\@aAsSum, $LaunchSum, "assumed summary for above") if ($assumeResumeTimeAs> 0);
 			
 	print "\n - Processes which is NOT launched by user\n";		
 	foreach my $proc ( sort keys %hashProc) {
 		my $tLaunchCnt = getLaunchCnt($proc);
-		putOneRecord($proc, $tLaunchCnt, \@aSummary);
+		putOneRecord($proc, $tLaunchCnt, \@aSummary, \@aAsSum);
 		$LaunchSum += $tLaunchCnt;
 	}
 	putSummary(\@aSummary, $LaunchSum, "summary for all");
+#	putSummary(\@aAsSum, $LaunchSum, "assumed summary for all") if ($assumeResumeTimeAs> 0);
 	remainedLC();
 		
 	# put assumed processes
@@ -277,11 +313,20 @@ sub resultLoadingTime
 	print " + $error ERRORS! Something is wrong from PARSING phase.\n" if ($error > 0);	
 	
 	# print time
-	print " ( main log gathered from ";
-	my $strformat = "%m-%d %H:%M:%S";
-	print $startTime->strftime($strformat); print " to "; print $endTime->strftime($strformat); 
+	print "\n + log time \n";
+	my $strformat = "%m-%d %H:%M:%S";	
+	# Put log time. for system log
+	print "   * As system log, ";
+	print $startTime->strftime($strformat); print " ~ "; print $endTime->strftime($strformat); 
 	$startTime = $endTime -$startTime;
-	printf " - %d days, %d hours, %d minutes and %d seconds )\n\n",(gmtime $startTime->seconds)[7,2,1,0];
+	printf " ( %d days, %d hours, %d minutes and %d seconds )\n",(gmtime $startTime->seconds)[7,2,1,0];
+	# Put log time. for event log	
+	print "   * As event log,  ";
+	print $startTime2->strftime($strformat); print " ~ "; print $endTime2->strftime($strformat); 
+	$startTime2 = $endTime2 -$startTime2;
+	printf " ( %d days, %d hours, %d minutes and %d seconds )\n",(gmtime $startTime2->seconds)[7,2,1,0];
+	
+	print "\n";
 }
 
 sub putSummary
@@ -299,7 +344,7 @@ sub putSummary
 	
 	# show summary / AVG of displayed time.
 	print "\n";
-	print " " foreach (0..$lenLongestProc+15);
+	print " " foreach (0..$lenLongestProc+17);
 	printf (" %.1f%% ",@$aSummary[$_]*100/@$aSummary[0]) foreach (2..$#$aSummary);
 }
 
@@ -327,22 +372,33 @@ sub getLines
 	print " - Parsing $_ ...";
 	
 	# open output file if needed
-	open my $output_fh, ">>", $outDisplayList or die "ERROR! when open output file\n $!\n" if ($dpTimeToFile > 0 && $job == 0);
+	open my $output_fh, ">>", $outDisplayList or die "ERROR! when open output file\n $!\n" if ($dpTimeToFile > 0 && $job == 2);
 
 	while (my $line = <$fh> )
 	{
-		# count logs for Resume rate.
-		if ($job > 0)
-		{
-			if ($line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\// )
-			{				
-				my $timestamp = Time::Piece->strptime( $1, "%m-%d %H:%M:%S");
-				next if ( $timestamp <= ($startTime-10)|| $timestamp >= ($endTime) );
-			}		
-		}
-		
 		if ($job == 2)	# parsing event log
 		{
+			if ($line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/activity_launch_time.*:\s\[\d+,(\S+),(\S+),(\S+)\]/ )
+			{
+				#print " $1 - ";
+				
+				my $timestamp = Time::Piece->strptime( $1, "%m-%d %H:%M:%S");
+				next if ( $timestamp <= ($startTime) || $timestamp >= ($endTime+10) );
+				
+				$startTime2 = $timestamp if ($startTime2 > $timestamp || $startTime2 == 0);
+				$endTime2 = $timestamp if ($endTime2 < $timestamp);
+				
+				print "launch_time - $2, $3 and $4\n" if ($3 > $4);
+				my $proc = $2;
+				my $durSec = $3;
+				pushToHashDisplay ($proc, $durSec);
+				
+#				print "FOUND! - $timestamp $proc $durSec\n" if ($proc =~/facebook/);				
+				print $output_fh "\n$timestamp $proc $durSec";
+				
+				$count++;
+			}		
+=cut		
 			if ($line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+)\sI\/am_restart_activity.*:\s\[\d+,\d+,(\S+)\]/ )
 			{
 				#print "Restart - $2\n";
@@ -356,7 +412,7 @@ sub getLines
 				pushToHashEvent( $2, 1);
 				$justLaunched = $1 if ( $2 =~ /(\S+)\/\S+/);	# get process name without activity name.
 				$count++;
-			}
+			}			
 			elsif ($line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+)\sI\/am_on_resume_called.*:\s(\S+)/ )
 			{
 				#print "on Resume Called- $2\n";
@@ -368,13 +424,19 @@ sub getLines
 				{	
 					#print " something wrong - $2's resume called instead $justLaunched\n";	
 				}
-			}		
+			}	
+=cut			
 		}
 		elsif ( $job == 1) # parsing system log
 		{			
-			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=(\S+)}/ )
+			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=(\S+)}/ )
 			{	# Launched.
-				#print ("\n + $1 - LAUNCHED...$2..");					
+				my $timestamp = Time::Piece->strptime( $1, "%m-%d %H:%M:%S");
+				$startTime = $timestamp if ($startTime > $timestamp || $startTime == 0);
+				$endTime = $timestamp if ($endTime < $timestamp);
+				
+				#print ("\n + $1 - LAUNCHED...$2..");	
+				next if ($line =~ /$opIgnoreProcName/);					
 				pushToHashResume( $2, 0);
 				#print "000 - $1, $2\n";
 				$justLaunched = $1 if ( $2 =~ /(\S+)\/\S+/);	# get process name without activity name.			
@@ -391,10 +453,13 @@ sub getLines
 				}
 			}
 		}
+=cut		
 		# or count for Displayed time.
 		elsif ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sDisplayed\s(\S+):\s(\+\S+ms)/ )
 		{
 #			print $1." - ".$2." > ".$3."\n";
+			next if ($line =~ /$opIgnoreProcName/);
+			
 			my $logTime = $1;
 			my $proc = $2;
 			my $durSec = 0;
@@ -425,13 +490,15 @@ sub getLines
 			print $output_fh "\n$logTime $proc $durSec" if (defined($output_fh));
 #			print "$logTime $proc $durSec\n" if (defined($output_fh));
 		}
+=cut		
 	}
 	print "\tFound $count ";
 	print "\"START...\"" if ($job==1);
 	print "\"Displayed...\"" if ($job==0);	
 	print " in lines.\n";
 	close $fh;
-	$totalCount += $count if ($job==0);
+	#$totalCount += $count if ($job==0);
+	$totalCount += $count if ($job==2);
 	$launchedCount += $count if ($job==1);
 	
 	if (defined($output_fh))
@@ -530,17 +597,21 @@ sub getFilename
 	opendir(dirHandle, $path) || die "Failed to open. check the path : \\$path";
 	my @files = readdir( dirHandle );	# get every files from dirHandle.
 	closedir dirHandle;  # ²À ´ÝÀ¾...
-
+=cut
 	# get MainLog files and push to logfiles array.
 	foreach (@files) {
 		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /main\.log.*/);
 	}
-	
+=cut	
 	foreach (@files) {
 		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /system\.log.*/);
-#		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /events\.log.*/);
+	}
+	
+	foreach (@files) {
+		push @logfiles,abs_path($path."\\".$_) if ($_ =~ /events\.log.*/);
 	}
 }
+
 
 
 
