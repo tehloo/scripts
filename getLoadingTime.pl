@@ -429,7 +429,7 @@ sub getLines
 		}
 		elsif ( $job == 1) # parsing system log
 		{			
-			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=(\S+)}/ )
+			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=([0-9a-zA-Z.\/]+)\s/ )
 			{	# Launched.
 				my $timestamp = Time::Piece->strptime( $1, "%m-%d %H:%M:%S");
 				$startTime = $timestamp if ($startTime > $timestamp || $startTime == 0);
