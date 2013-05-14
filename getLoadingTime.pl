@@ -378,7 +378,7 @@ sub getLines
 	{
 		if ($job == 2)	# parsing event log
 		{
-			if ($line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/activity_launch_time.*:\s\[\d+,(\S+),(\S+),(\S+)\]/ )
+			if ($line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+.*\sI\sam_activity_launch_time:\s\[\d+,\d+,(\S+),(\S+),(\S+)\]/ )
 			{
 				#print " $1 - ";
 				
@@ -428,22 +428,22 @@ sub getLines
 =cut			
 		}
 		elsif ( $job == 1) # parsing system log
-		{			
-			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+\sI\/Activity.*:\sSTART\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=([0-9a-zA-Z.\/]+)\s/ )
+		{
+			if ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+)\.\d+.*I\sActivity.*:\sSTART\su0\s{act=android.intent.action.MAIN cat=\[android.intent.category.LAUNCHER\]\s\S+\scmp=(\S+)}\s/ )
 			{	# Launched.
 				my $timestamp = Time::Piece->strptime( $1, "%m-%d %H:%M:%S");
 				$startTime = $timestamp if ($startTime > $timestamp || $startTime == 0);
 				$endTime = $timestamp if ($endTime < $timestamp);
 				
-				#print ("\n + $1 - LAUNCHED...$2..");	
-				next if ($line =~ /$opIgnoreProcName/);					
+				#print ("\n + $1 - LAUNCHED...$2..");
+				next if ($line =~ /$opIgnoreProcName/);
 				pushToHashResume( $2, 0);
 				#print "000 - $1, $2\n";
 				$justLaunched = $1 if ( $2 =~ /(\S+)\/\S+/);	# get process name without activity name.			
 				#print "001 - $justLaunched\n";
 				$count++;
 			}
-			elsif ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+)\sI\/Activity.*:\sStart proc\s(\S+)\sfor\sactivity\s(\S+):/ )
+			elsif ( $line =~ /^(\d+-\d+\s\d+:\d+:\d+\.\d+).*I\sActivity.*:\sStart proc\s(\S+)\sfor\sactivity\s(\S+):/ )
 			{	# it is "Start process" as it means. it is not Activity Resume.
 				#print "111 - $1, $2 - $line\n";
 				if ( $2 eq $justLaunched )
