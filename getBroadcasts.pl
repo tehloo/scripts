@@ -29,19 +29,22 @@ my $startIntent = "android.intent.action.USER_STARTED";
 my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
+my $showReceivers = 1;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
 		"android.intent.action.TIME_TICK",
-		"lge.android.intent.action.CKERROR"
-		
+		"lge.android.intent.action.CKERROR"		
 	);
 
+my $intentToFindReceivers = "android.intent.action.SCREEN_OFF";
 
 # hashes and arrays for parsing......................................
 my @broadcastList = ();		# get UID as array list.
-my %broadcastHash = ();		# hash for (UID, href for each records)
+my %broadcastHash = ();		# hash for (UID, href for intent records)
 my %prevBroadcastHash; 		# copy a hash
+
+my @receiverList = ();		# array for (UID, href for receiver records);
 
 # variables for parsing..............................................
 my $count = 0;
@@ -88,12 +91,22 @@ while ( my $line = <$HF> )
 		} elsif ($2 =~ /Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
 			updateIntent($1, $time, 'deliveryFinish', 'parallel', $2);
 
-		} elsif ( $2 =~ /Delivering to BroadcastFilter\{\S+ u\S+ ReceiverList\{\S+ \S+ \S+ \S+\}\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
-			addReceiverCount($1);
+		} elsif ( $2 =~ /Delivering to BroadcastFilter\{\S+ u\S+ (ReceiverList\{\S+ \S+ \S+ \S+\})\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
+			addReceiverCount($2);
+			pushReceiver($2, $1, $time, $3);
 
-		} elsif ( $2 =~ /Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)/) {
+		} elsif ( $2 =~ /Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/) {
 #			print $line;
 			addReceiverCount($1);
+			pushReceiver($1, $3, $time, $2);
+			#			Need to start app [background] com.google.android.gm for broadcast BroadcastRecord{42d0d800 u10 android.intent.action.BOOT_COMPLETED}
+		} elsif ( $2 =~ /Need to start app \S+ (\S+) for broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
+			my $appName = $1;
+			my $intentUid = $2;
+			my $intent = $3;
+
+			appStartedForReceiver($appName, $intentUid, $intent);		
+			
 		}
 
 	} elsif ( $line =~ /\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sActivityManager:(.*)$/ ) {
@@ -199,7 +212,57 @@ sub makeIntent {
 #			print "enqueue as %pBroadcast\n";
 }
 
+my @arrayStartedApp = ();
 
+sub pushReceiver {
+			my $uid = $_[0];
+			my $receiver = $_[1];
+			my $time = $_[2];
+			my $intent = $_[3];
+			
+			return if ($intent ne $intentToFindReceivers);
+			my $appName ="";
+			
+			if (scalar @arrayStartedApp > 0) {
+				$appName = pop @arrayStartedApp ;
+				if ($appName ne getAppName($receiver)) {
+					push @arrayStartedApp, $appName;
+					$appName = "";				
+				}
+			}
+			
+			
+			my %pReceiver = (
+#					uid => $uid,
+					receiver => $receiver,
+					time => $time,
+					appStart => $appName
+					);
+
+			push @receiverList, \%pReceiver;		
+}
+
+sub getAppName {
+	my $Receiver = shift;
+	my $appName = "";
+	
+	if ($Receiver =~ /ProcessRecord\{\S+ \d+:(\S+)\/u\S+\}/) {
+		$appName = $1;		
+	}
+	return $appName;
+}
+
+
+
+sub appStartedForReceiver {
+			my $appName = $_[0];
+			my $uid = $_[1];
+			my $intent = $_[2];
+			
+			return if ($intent ne $intentToFindReceivers);
+			
+			push @arrayStartedApp, $appName;
+}
 
 ######################################
 ####  scan and list up!
@@ -250,7 +313,7 @@ foreach my $uid ( @broadcastList ) {
 ######################################
 print "\n\n";
 print "$startNFinish\n";
-print " DURATION = ".getSecond(getDt($timeEnd) - getDt($timeStart))."ms.\n\n";
+print " DURATION = ".getSecond(getDt($timeEnd) - getDt($timeStart))." sec.\n\n";
 print " ";
 print scalar @broadcastList. " broadcasts";
 print " ($countNotDelivered broadcasts has delivered after $endIntent and not counted)\n";
@@ -263,6 +326,42 @@ printHash(\%hash_IntentType, "\n");
 =cut
 
 
+
+summaryReceivers();
+
+######################################
+####  get receivers
+######################################
+sub summaryReceivers {
+			print "\n ". scalar @receiverList." Receivers for $intentToFindReceivers \n";
+
+			my $prevTime = 0;
+			my $countStartedApp = 0;
+			my $sumDuration = 0;
+
+			foreach my $href ( @receiverList ) {
+				my $receiver = $href->{'receiver'};
+				my $time = $href->{'time'};
+				my $durationTime = $prevTime > 0 ? getDt($time) - $prevTime : 0;
+				my $appStarted = $href->{'appStart'};
+				$prevTime = getDt($time);
+				
+				my $delimeter = "-";
+				if (length($appStarted) > 0) {
+					$delimeter = "+" ;
+					$countStartedApp++;
+				}
+				
+				printf " %s %6d ms / %s\n", $delimeter, $durationTime, $receiver if $showReceivers > 0;
+				$sumDuration += $durationTime;
+			}
+
+			printf "\n %d ms takes and", $sumDuration;
+			print " $countStartedApp app started for $intentToFindReceivers.\n";
+			print "\n\n";
+
+			print @arrayStartedApp;
+}
 
 
 
