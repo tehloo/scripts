@@ -30,6 +30,13 @@ my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
 
+my @intentToIgnore = (
+		"android.intent.action.BATTERY_CHANGED",
+		"android.intent.action.TIME_TICK",
+		"lge.android.intent.action.CKERROR"
+		
+	);
+
 
 # hashes and arrays for parsing......................................
 my @broadcastList = ();		# get UID as array list.
@@ -73,28 +80,13 @@ while ( my $line = <$HF> )
 #		print $1." / ".$2."\n";
 
 		if ( $2 =~ /Processing (\S+) broadcast \[(\S+)\] BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
-
 			updateIntent($3, $time, 'deliveryStart', $1, $4, $2);
 			
 		} elsif ( $2 =~ /Finished with ordered broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
 			updateIntent($1, $time, 'deliveryFinish', 'ordered', $2);
-			
-			if ($2 eq $endIntent) {
-				
-				$bStarted = 2;
-				$timeEnd = $time;
-				$startNFinish = $startNFinish."\n FINISH - $endIntent at line#$count ($time)\n";
-			}
 
 		} elsif ($2 =~ /Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
 			updateIntent($1, $time, 'deliveryFinish', 'parallel', $2);
-			
-			if ($2 eq $endIntent) {
-				
-				$bStarted = 2;
-				$timeEnd = $time;
-				$startNFinish = $startNFinish."\n FINISH - $endIntent at line#$count ($time)\n";
-			}
 
 		} elsif ( $2 =~ /Delivering to BroadcastFilter\{\S+ u\S+ ReceiverList\{\S+ \S+ \S+ \S+\}\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
 			addReceiverCount($1);
@@ -116,13 +108,13 @@ while ( my $line = <$HF> )
 			my $uid = $2;
 			my $intent = $3;
 			
-			if ($intent eq $startIntent) {
+			if ($bStarted == 0 && $intent eq $startIntent) {
 				$bStarted = 1;
 				$timeStart = $time;
 				$startNFinish = " START - $startIntent at line#$count ($time)";
 			}
 			
-			if ($bStarted > 0) {
+			if ($bStarted == 1) {
 #				print $line;
 				makeIntent($type, $uid, $intent, $time);			
 				$maxLenIntent = length($intent) if ($maxLenIntent < length($intent));
@@ -145,6 +137,13 @@ sub updateIntent {
 				if ($href->{'type'} eq $type) {
 					$href->{$field} = $time;
 					$href->{'priority'} = $priority if defined($priority);
+					
+					#finish. if needed.
+					if ($field eq "deliveryFinish" && $intent eq $endIntent && $bStarted == 1) {
+						$bStarted = 2;
+						$timeEnd = $time;
+						$startNFinish = $startNFinish."\n FINISH - $endIntent at line#$count ($time)\n";
+					}
 					
 				} elsif ($showNotExist) {
 					print "NOT EXIST!!!! intent $uid/ $field for $intent ($count)\n";
@@ -178,8 +177,11 @@ sub makeIntent {
 			my $intent = $_[2];
 			my $time = $_[3];
 			
-			my $broadcastHref;
+			foreach my $ignore ( @intentToIgnore ) {
+				return if ($ignore eq $intent);
+			}
 			
+			my $broadcastHref;			
 			my %pBroadcast = (
 					uid => $uid,
 					intent => $intent,
@@ -305,7 +307,8 @@ sub printIntent {
 		{print "\t\t\t";}
 	print "$deliveryFinish";
 	
-	print " [".getSecond(getDt($deliveryFinish) - getDt($enqueueTime))."s]" if ($deliveryStart ne 0);
+	print " [".getSecond(getDt($deliveryFinish) - getDt($deliveryStart))."s/" if ($deliveryStart ne 0);
+	print getSecond(getDt($deliveryFinish) - getDt($timeStart))."s]" if ($deliveryStart ne 0);
 	print "\n";
 	
 #	print "\n" if ($endIntent eq $intent) 
