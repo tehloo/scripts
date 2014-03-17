@@ -3,6 +3,7 @@
 use strict;
 use warnings;
 use POSIX 'isatty';
+use Cwd 'abs_path';
 
 use Time::Piece;
 
@@ -18,6 +19,7 @@ my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
 my $showReceivers = 0;
+my $showLogtime = 0;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
@@ -36,7 +38,7 @@ my @receiverList = ();		# array for (UID, href for receiver records);
 my @arrayStartedApp = ();
 
 # variables for parsing..............................................
-my $count = 0;
+#my $count = 0;
 my $maxLenIntent = 0;
 my $bStarted = 0;
 
@@ -47,6 +49,9 @@ my $startNFinish = "";
 
 
 # regular expressions
+my $REGEX_TAG_ACTIVITY_MANAGER = qr/\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sActivityManager:(.*)$/;
+my $REGEX_TAG_BROADCAST_QUEUE = qr/\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sBroadcastQueue:(.*)$/;
+
 my $REGEX_DELIVERY_START =  qr/Processing (\S+) broadcast \[(\S+)\] BroadcastRecord\{(\S+) \S+ (\S+)\}/;
 
 my $REGEX_ORDERED_DELIVERY_FINISH = qr/Finished with ordered broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/;
@@ -67,37 +72,125 @@ if ( ! @ARGV && isatty(*STDIN) ) {
 
 # open file 
 my $HF;
+my @fileList = ();
+
+
 if (@ARGV) {
-	if ( -d $ARGV[0] ) {
-		print "it's dir!!!";
-		return;
+	if ( -d $ARGV[0] ) {		
+		getFilename($ARGV[0], \@fileList);
+		die "\nfile not found...\n" if scalar @fileList == 0;
+		
 	} elsif ( -f $ARGV[0]  ) {
-		open ($HF, $ARGV[0]);
+		push @fileList, $ARGV[0];
 	}
 }
 else {
 	$HF = \*STDIN;
 }
 
-# read line by line
-while ( my $line = <$HF> )
-{
-	parseInline($line);
+my $filecount = scalar @fileList;
+my %hash_fileIndex = ();
+my %hash_fileIndexComplete = ();
+
+while ($filecount) {
+	$filecount--;
+	my $filename = $fileList[$filecount];
+	
+	open ($HF, $filename);
+	
+	# read line by line
+	#print " READ $filename...\n";
+	
+	my $lineCount = 0;
+	
+	while ( my $line = <$HF> )
+	{
+	#	parseInline($line);
+		$lineCount++;
+		if ( $line =~ /$REGEX_TAG_BROADCAST_QUEUE/ ) {		
+			my $time = $1;
+
+			if ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/ || $2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
+				#print "\n Found end!\n";
+				$hash_fileIndexComplete{'startFile'} = $hash_fileIndex{'startFile'};
+				$hash_fileIndexComplete{'startLine'} = $hash_fileIndex{'startLine'};
+				$hash_fileIndexComplete{'endFile'} = $filename;
+				$hash_fileIndexComplete{'endLine'} = $lineCount;
+				$hash_fileIndexComplete{'cycleCount'} = 0 if !(exists $hash_fileIndexComplete{'cycleCount'});
+				$hash_fileIndexComplete{'cycleCount'} = $hash_fileIndexComplete{'cycleCount'} + 1;
+				
+			}
+		} elsif ( $line =~ /$REGEX_TAG_ACTIVITY_MANAGER/ ) {
+			my $time = $1;
+
+			if ($2 =~ /$REGEX_ENQUEUE_BR/) {
+				my $intent = $3;
+				
+				if ($intent eq $startIntent) {
+	#				$startNFinish = " START - $startIntent at line#$lineCount ($time)";
+					$hash_fileIndex{'startFile'} = $filename;
+					$hash_fileIndex{'startLine'} = $lineCount;
+				}
+			}
+		}
+	}
+}
+
+print "\n Scan completed... ";
+print $hash_fileIndexComplete{'cycleCount'}." times cycles in log...\n";
+print "\t from ".$hash_fileIndexComplete{'startFile'}." line #".$hash_fileIndexComplete{'startLine'};
+print "\n\t to ".$hash_fileIndexComplete{'endFile'}." line #".$hash_fileIndexComplete{'endLine'}."\n";
+#printHash (\%hash_fileIndexComplete, "\n");
+print "\n";
+
+$filecount = scalar @fileList;
+while ($filecount) {
+	$filecount--;
+	my $filename = $fileList[$filecount];
+	
+	next if ($hash_fileIndexComplete{'startFile'} ne $filename);
+	print " parsing $filename...\n";
+	
+	my $lineCount = 0;
+	open ($HF, $filename);
+	
+	while ( my $line = <$HF> )
+	{
+		$lineCount++;
+		next if ($hash_fileIndexComplete{'startLine'} > $lineCount);
+		last if parseInline($line, $lineCount) == -1;
+	}
 }
 
 
 
+sub getFilename 
+{
+	my $path = shift;
+	my $fileList = shift;
+
+	opendir(dirHandle, $path) || die "Failed to open. check the path : \\$path";
+	my @files = readdir( dirHandle );	# get every files from dirHandle.
+	closedir dirHandle;
+	
+#	$path = $path."/" if ($path =~ /.*\//)
+	
+	foreach (@files) {
+		push @$fileList, ($path."/$_") if ($_ =~ /system\.log.*/);
+	}
+}
+
+
 sub parseInline {
 	my $line = shift;
-	
-	$count++;
+	my $count = shift;
 	
 	if ($bStarted == 2) {
 		%prevBroadcastHash = %broadcastHash;	# copy all~
-		last;
+		return -1;
 	}
 	
-	if ( $line =~ /\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sBroadcastQueue:(.*)$/ ) {
+	if ( $line =~ /$REGEX_TAG_BROADCAST_QUEUE/ ) {
 	
 		my $time = $1;
 		my $proc = "";
@@ -109,13 +202,13 @@ sub parseInline {
 #		print $1." / ".$2."\n";
 
 		if ( $2 =~ /$REGEX_DELIVERY_START/) {
-			updateIntent($3, $time, 'deliveryStart', $1, $4, $2);
+			updateIntent($count, $3, $time, 'deliveryStart', $1, $4, $2);
 			
 		} elsif ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/) {
-			updateIntent($1, $time, 'deliveryFinish', 'ordered', $2);
+			updateIntent($count, $1, $time, 'deliveryFinish', 'ordered', $2);
 
 		} elsif ($2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
-			updateIntent($1, $time, 'deliveryFinish', 'parallel', $2);
+			updateIntent($count, $1, $time, 'deliveryFinish', 'parallel', $2);
 
 		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_RECEIVER_LIST/) {
 			addReceiverCount($2);
@@ -134,7 +227,7 @@ sub parseInline {
 			
 		}
 
-	} elsif ( $line =~ /\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sActivityManager:(.*)$/ ) {
+	} elsif ( $line =~ /$REGEX_TAG_ACTIVITY_MANAGER/ ) {
 		my $time = $1;
 
 		if ($2 =~ /$REGEX_ENQUEUE_BR/) {
@@ -155,16 +248,18 @@ sub parseInline {
 			}
 		}
 	}
+	return 0;
 }
 
 
 sub updateIntent {
-			my $uid = $_[0];
-			my $time = $_[1];
-			my $field = $_[2];
-			my $type = $_[3];
-			my $intent = $_[4];
-			my $priority = $_[5] if defined($_[5]);
+			my $count = $_[0];
+			my $uid = $_[1];
+			my $time = $_[2];
+			my $field = $_[3];
+			my $type = $_[4];
+			my $intent = $_[5];
+			my $priority = $_[6] if defined($_[5]);
 			
 			if (exists $broadcastHash{$uid}) {
 #				print "EXIST! ";
@@ -294,9 +389,9 @@ my $ignoreNotDelivered = 1;
 my $countNotDelivered = 0;
 
 print " uid\t    type \t Broadcast Intent ";
-my $gap = $maxLenIntent-20;
-print " " while ($gap--);
-print " receivers\t enqueue time\t\t delivery start\t\t delivery finish\n\n";
+my $gap = $maxLenIntent-22;
+print " " while ($gap-- > 0);
+print " receivers\ten.Q  ~~  Delivery  ~~  Finish\t Delivery time\ten.Q~finish\n\n";
 
 foreach my $uid ( @broadcastList ) {
 	if (exists $broadcastHash{$uid}) {
@@ -413,24 +508,30 @@ sub printIntent {
 	print " " while ($gap--);
 	print " $receiverCount\t";
 	
-	print "$enqueueTime";
+	print "$enqueueTime" if $showLogtime;
 	if ($deliveryStart ne 0)
-	{printf " ~(%4d ms)~  ",(getDt($deliveryStart) - getDt($enqueueTime))}
+	{printf " %7d ms ",(getDt($deliveryStart) - getDt($enqueueTime))}
 	else
 		{print "\t\t\t";	}
-	print "$deliveryStart";
+	print "$deliveryStart" if $showLogtime;;
 	
 	if ($deliveryStart ne 0)
-		{printf " ~(%4d ms)~  ",(getDt($deliveryFinish) - getDt($deliveryStart))}
+		{printf " %7d ms ",(getDt($deliveryFinish) - getDt($deliveryStart))}
 	else
 		{print "\t\t\t";}
-	print "$deliveryFinish";
+	print "$deliveryFinish" if $showLogtime;;
 	
-	print " [".getSecond(getDt($deliveryFinish) - getDt($deliveryStart))."s/" if ($deliveryStart ne 0);
-	print getSecond(getDt($deliveryFinish) - getDt($timeStart))."s]" if ($deliveryStart ne 0);
+	printf "\t %7d ms ", getDt($deliveryFinish) - getDt($timeStart) if ($deliveryStart ne 0);
 	print "\n";
 	
 #	print "\n" if ($endIntent eq $intent) 
+}
+
+# insert commas for big number
+sub subCommify {
+    my $text = reverse $_[0];
+    $text =~ s/(\d\d\d)(?=\d)(?!\d*\.)/$1,/g;
+    return scalar reverse $text
 }
 
 sub printHash {
