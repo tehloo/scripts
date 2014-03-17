@@ -7,19 +7,7 @@ use POSIX 'isatty';
 use Time::Piece;
 
 
-# get filename or STDIN via pipe.
-if ( ! @ARGV && isatty(*STDIN) ) {
-    die "usage: ...";
-}
 
-# open file 
-my $HF;
-if (@ARGV) {
-	open ($HF, $ARGV[0]) if ( -f $ARGV[0]  );
-}
-else {
-	$HF = \*STDIN;
-}
 
 # CONTANTS...........................................................
 #my $startIntent = "android.intent.action.USER_BACKGROUND";
@@ -29,7 +17,7 @@ my $startIntent = "android.intent.action.USER_STARTED";
 my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
-my $showReceivers = 1;
+my $showReceivers = 0;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
@@ -45,6 +33,7 @@ my %broadcastHash = ();		# hash for (UID, href for intent records)
 my %prevBroadcastHash; 		# copy a hash
 
 my @receiverList = ();		# array for (UID, href for receiver records);
+my @arrayStartedApp = ();
 
 # variables for parsing..............................................
 my $count = 0;
@@ -57,13 +46,50 @@ my ($timeStart, $timeEnd);
 my $startNFinish = "";
 
 
+# regular expressions
+my $REGEX_DELIVERY_START =  qr/Processing (\S+) broadcast \[(\S+)\] BroadcastRecord\{(\S+) \S+ (\S+)\}/;
+
+my $REGEX_ORDERED_DELIVERY_FINISH = qr/Finished with ordered broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/;
+my $REGEX_PARALLEL_DELIVERY_FINISH = qr/Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/;
+
+my $REGEX_DELIVERING_TO_RECEIVER_LIST = qr/Delivering to BroadcastFilter\{\S+ u\S+ (ReceiverList\{\S+ \S+ \S+ \S+\})\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
+my $REGEX_DELIVERING_TO_APP = qr/Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/;
+
+my $REGEX_NEED_APP_START = qr/Need to start app \S+ (\S+) for broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
+my $REGEX_ENQUEUE_BR = qr/Enqueueing (\S+) broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/;
 
 
 
+# get filename or STDIN via pipe.
+if ( ! @ARGV && isatty(*STDIN) ) {
+    die "usage: ...";
+}
+
+# open file 
+my $HF;
+if (@ARGV) {
+	if ( -d $ARGV[0] ) {
+		print "it's dir!!!";
+		return;
+	} elsif ( -f $ARGV[0]  ) {
+		open ($HF, $ARGV[0]);
+	}
+}
+else {
+	$HF = \*STDIN;
+}
 
 # read line by line
 while ( my $line = <$HF> )
 {
+	parseInline($line);
+}
+
+
+
+sub parseInline {
+	my $line = shift;
+	
 	$count++;
 	
 	if ($bStarted == 2) {
@@ -82,25 +108,24 @@ while ( my $line = <$HF> )
 #		print $line;
 #		print $1." / ".$2."\n";
 
-		if ( $2 =~ /Processing (\S+) broadcast \[(\S+)\] BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
+		if ( $2 =~ /$REGEX_DELIVERY_START/) {
 			updateIntent($3, $time, 'deliveryStart', $1, $4, $2);
 			
-		} elsif ( $2 =~ /Finished with ordered broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
+		} elsif ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/) {
 			updateIntent($1, $time, 'deliveryFinish', 'ordered', $2);
 
-		} elsif ($2 =~ /Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
+		} elsif ($2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
 			updateIntent($1, $time, 'deliveryFinish', 'parallel', $2);
 
-		} elsif ( $2 =~ /Delivering to BroadcastFilter\{\S+ u\S+ (ReceiverList\{\S+ \S+ \S+ \S+\})\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
+		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_RECEIVER_LIST/) {
 			addReceiverCount($2);
 			pushReceiver($2, $1, $time, $3);
 
-		} elsif ( $2 =~ /Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/) {
-#			print $line;
+		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_APP/) {
 			addReceiverCount($1);
 			pushReceiver($1, $3, $time, $2);
-			#			Need to start app [background] com.google.android.gm for broadcast BroadcastRecord{42d0d800 u10 android.intent.action.BOOT_COMPLETED}
-		} elsif ( $2 =~ /Need to start app \S+ (\S+) for broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\}/) {
+
+		} elsif ( $2 =~ /$REGEX_NEED_APP_START/) {
 			my $appName = $1;
 			my $intentUid = $2;
 			my $intent = $3;
@@ -112,11 +137,7 @@ while ( my $line = <$HF> )
 	} elsif ( $line =~ /\d+-\d+ (\S+)\s+\d+\s+\d+\s\S\sActivityManager:(.*)$/ ) {
 		my $time = $1;
 
-#		print $1." / ".$2."\n";
-#				   Enqueueing parallel broadcast BroadcastRecord
-#			      /Enqueueing ordered broadcast BroadcastRecord{43048978 u-1 android.intent.action.USER_STARTING}: prev had 0
-		if ($2 =~ /Enqueueing (\S+) broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/) {
-#			print " * enqueue ... ".$line;
+		if ($2 =~ /$REGEX_ENQUEUE_BR/) {
 			my $type = $1;
 			my $uid = $2;
 			my $intent = $3;
@@ -135,6 +156,7 @@ while ( my $line = <$HF> )
 		}
 	}
 }
+
 
 sub updateIntent {
 			my $uid = $_[0];
@@ -211,8 +233,6 @@ sub makeIntent {
 			
 #			print "enqueue as %pBroadcast\n";
 }
-
-my @arrayStartedApp = ();
 
 sub pushReceiver {
 			my $uid = $_[0];
