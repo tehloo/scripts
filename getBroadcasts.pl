@@ -18,16 +18,17 @@ my $startIntent = "android.intent.action.USER_STARTED";
 my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
-my $showReceivers = 0;
+my $showReceivers = 1;
 my $showLogtime = 0;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
 		"android.intent.action.TIME_TICK",
-		"lge.android.intent.action.CKERROR"		
+		"lge.android.intent.action.CKERROR",
+		"com.lge.android.intent.action.BATTERYEX"		
 	);
 
-my $intentToFindReceivers = "android.intent.action.SCREEN_OFF";
+my $intentToFindReceivers = "android.intent.action.BOOT_COMPLETED";
 
 # hashes and arrays for parsing......................................
 my @broadcastList = ();		# get UID as array list.
@@ -206,6 +207,7 @@ sub parseInline {
 			
 		} elsif ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/) {
 			updateIntent($count, $1, $time, 'deliveryFinish', 'ordered', $2);
+			pushReceiver($1, "finfinfin", $time, $2);
 
 		} elsif ($2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
 			updateIntent($count, $1, $time, 'deliveryFinish', 'parallel', $2);
@@ -391,7 +393,7 @@ my $countNotDelivered = 0;
 print " uid\t    type \t Broadcast Intent ";
 my $gap = $maxLenIntent-22;
 print " " while ($gap-- > 0);
-print " receivers\ten.Q  ~~  Delivery  ~~  Finish\t Delivery time\ten.Q~finish\n\n";
+print " receivers\ten.Q  ~~  Delivery  ~~  Finish\t en.Q~finish\t start~Fin.\n\n";
 
 foreach my $uid ( @broadcastList ) {
 	if (exists $broadcastHash{$uid}) {
@@ -453,22 +455,31 @@ sub summaryReceivers {
 			my $prevTime = 0;
 			my $countStartedApp = 0;
 			my $sumDuration = 0;
-
-			foreach my $href ( @receiverList ) {
-				my $receiver = $href->{'receiver'};
-				my $time = $href->{'time'};
-				my $durationTime = $prevTime > 0 ? getDt($time) - $prevTime : 0;
-				my $appStarted = $href->{'appStart'};
-				$prevTime = getDt($time);
-				
-				my $delimeter = "-";
-				if (length($appStarted) > 0) {
-					$delimeter = "+" ;
-					$countStartedApp++;
+			my $prevHref = 0;
+			my $countReceiver = scalar @receiverList;
+			
+			while ( $countReceiver-- ) {
+			
+				my $href = shift (@receiverList);
+			
+				if ($prevHref ne 0) {
+					my $receiver = $prevHref->{'receiver'};
+					my $time = $prevHref->{'time'};
+					my $nextTime = $href->{'time'};
+					my $durationTime = getDt($nextTime) - getDt($time);
+					my $appStarted = $prevHref->{'appStart'};
+					$prevTime = getDt($time);
+					
+					my $delimeter = "-";
+					if (length($appStarted) > 0) {
+						$delimeter = "+" ;
+						$countStartedApp++;
+					}
+					
+					printf " %s %6d ms / %s\n", $delimeter, $durationTime, $receiver if $showReceivers > 0;
+					$sumDuration += $durationTime;
 				}
-				
-				printf " %s %6d ms / %s\n", $delimeter, $durationTime, $receiver if $showReceivers > 0;
-				$sumDuration += $durationTime;
+				$prevHref = $href;
 			}
 
 			printf "\n %d ms takes and", $sumDuration;
@@ -521,6 +532,7 @@ sub printIntent {
 		{print "\t\t\t";}
 	print "$deliveryFinish" if $showLogtime;;
 	
+	printf "\t %7d ms ", getDt($deliveryFinish) - getDt($enqueueTime) if ($deliveryStart ne 0);
 	printf "\t %7d ms ", getDt($deliveryFinish) - getDt($timeStart) if ($deliveryStart ne 0);
 	print "\n";
 	
