@@ -1,5 +1,11 @@
 #!/usr/bin/perl -w
 
+# getBroadcast.pl
+#
+# released on 2014.03.19
+#
+
+
 use strict;
 use warnings;
 use POSIX 'isatty';
@@ -19,7 +25,7 @@ my $endIntent = "android.intent.action.BOOT_COMPLETED";
 
 my $showNotExist = 0;
 my $showReceivers = 1;
-my $showLogtime = 0;
+my $showLogtime = 1;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
