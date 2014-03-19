@@ -71,111 +71,120 @@ if ( ! @ARGV && isatty(*STDIN) ) {
     die "usage: ...";
 }
 
-# open file 
+# open file as dir or single file.
 my $HF;
-my @fileList = ();
-
+my @gFileList = ();
+my $gHash_fileIndexComplete = 0;
 
 if (@ARGV) {
 	if ( -d $ARGV[0] ) {		
-		getFilename($ARGV[0], \@fileList);
-		die "\nfile not found...\n" if scalar @fileList == 0;
+		getFilename($ARGV[0], \@gFileList);
+		die "\nfile not found...\n" if scalar @gFileList == 0;
 		
 	} elsif ( -f $ARGV[0]  ) {
-		push @fileList, $ARGV[0];
+		push @gFileList, $ARGV[0];
 	}
 }
 else {
-	$HF = \*STDIN;
+#	$HF = \*STDIN;
+	die "usage: ...";
 }
 
-my $filecount = scalar @fileList;
-my @arrayIndex = ();
+subScanFileToParse();
 
-while ($filecount) {
-	$filecount--;
-	my $filename = $fileList[$filecount];
-	
-	open ($HF, $filename);
-	
-	# read line by line
-	#print " READ $filename...\n";
-	
-	my $lineCount = 0;
-	
-	while ( my $line = <$HF> )
-	{
-	#	parseInline($line);
-		$lineCount++;
-		if ( $line =~ /$REGEX_TAG_BROADCAST_QUEUE/ ) {		
-			my $time = $1;
-			
+sub subScanFileToParse 
+{
+	my $filecount = scalar @gFileList;
+	my @arrayIndex = ();
+
+	while ($filecount) {
+		$filecount--;
+		my $filename = $gFileList[$filecount];
+		
+		open ($HF, $filename);
+		
+		# read line by line
+		#print " READ $filename...\n";
+		
+		my $lineCount = 0;
+		
+		while ( my $line = <$HF> )
+		{
+		#	parseInline($line);
+			$lineCount++;
+			if ( $line =~ /$REGEX_TAG_BROADCAST_QUEUE/ ) {		
+				my $time = $1;
+				
 
 
-			if ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/ || $2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
-				my $uid = $1;
-				my $intent = $2;
-				if ($2 eq $endIntent) {
-					my $index = scalar @arrayIndex;
-					
-					while ($index) {
-						$index--;
-						my $href = $arrayIndex[$index];
-						if (exists $href->{'enqueEndIntentUid'}) {
-							if ($href->{'enqueEndIntentUid'} eq $uid) {
-								$href->{'endFile'} = $filename;
-								$href->{'endLine'} = $lineCount;
-								last;
-							}
-						}						
+				if ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/ || $2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
+					my $uid = $1;
+					my $intent = $2;
+					if ($2 eq $endIntent) {
+						my $index = scalar @arrayIndex;
+						
+						while ($index) {
+							$index--;
+							my $href = $arrayIndex[$index];
+							if (exists $href->{'enqueEndIntentUid'}) {
+								if ($href->{'enqueEndIntentUid'} eq $uid) {
+									$href->{'endFile'} = $filename;
+									$href->{'endLine'} = $lineCount;
+									last;
+								}
+							}						
+						}
 					}
 				}
-			}
 
-		} elsif ( $line =~ /$REGEX_TAG_ACTIVITY_MANAGER/ ) {
-			my $time = $1;
+			} elsif ( $line =~ /$REGEX_TAG_ACTIVITY_MANAGER/ ) {
+				my $time = $1;
 
-			if ($2 =~ /$REGEX_ENQUEUE_BR/) {
-				my $intent = $3;
-				
-				if ($intent eq $startIntent) {
-					my %hash_fileIndex = ();
-					$hash_fileIndex{'startFile'} = $filename;
-					$hash_fileIndex{'startLine'} = $lineCount;
-					push @arrayIndex, \%hash_fileIndex;
+				if ($2 =~ /$REGEX_ENQUEUE_BR/) {
+					my $intent = $3;
+					
+					if ($intent eq $startIntent) {
+						my %hash_fileIndex = ();
+						$hash_fileIndex{'startFile'} = $filename;
+						$hash_fileIndex{'startLine'} = $lineCount;
+						push @arrayIndex, \%hash_fileIndex;
 
-				} elsif ($intent eq $endIntent) {
-					my $href = $arrayIndex[-1];
-					$href->{'enqueEndIntentUid'} = $2;
+					} elsif ($intent eq $endIntent) {
+						my $href = $arrayIndex[-1];
+						$href->{'enqueEndIntentUid'} = $2;
+					}
 				}
 			}
 		}
 	}
-}
-
-my $hash_fileIndexComplete = 0;
-my $cycleCount = 0;
-while (my $href = pop @arrayIndex) {
-	if (exists $href->{'endFile'}) {
-		$hash_fileIndexComplete = $href if ($hash_fileIndexComplete == 0);
-		$cycleCount++;
-#		last;
+	
+	my $cycleCount = 0;
+	# pick last cycle to parse.
+	while (my $href = pop @arrayIndex) {
+		if (exists $href->{'endFile'}) {
+			$gHash_fileIndexComplete = $href if ($gHash_fileIndexComplete == 0);
+			$cycleCount++;
+		}
 	}
+
+	print "\n Scan completed... ";
+	print "$cycleCount times cycles in log...\n";
+	print "\t from ".$gHash_fileIndexComplete->{'startFile'}." line #".$gHash_fileIndexComplete->{'startLine'};
+	print "\n\t to ".$gHash_fileIndexComplete->{'endFile'}." line #".$gHash_fileIndexComplete->{'endLine'}."\n";
+	#printHash (\%hash_fileIndexComplete, "\n");
+	print "\n";
 }
 
-print "\n Scan completed... ";
-print "$cycleCount times cycles in log...\n";
-print "\t from ".$hash_fileIndexComplete->{'startFile'}." line #".$hash_fileIndexComplete->{'startLine'};
-print "\n\t to ".$hash_fileIndexComplete->{'endFile'}." line #".$hash_fileIndexComplete->{'endLine'}."\n";
-#printHash (\%hash_fileIndexComplete, "\n");
-print "\n";
 
-$filecount = scalar @fileList;
+
+
+my $filecount = scalar @gFileList;
+
 while ($filecount) {
 	$filecount--;
-	my $filename = $fileList[$filecount];
+	my $filename = $gFileList[$filecount];
 	
-	next if ($hash_fileIndexComplete->{'startFile'} ne $filename);
+	next if ($gHash_fileIndexComplete->{'startFile'} ne $filename);
 	print " parsing $filename...\n";
 	
 	my $lineCount = 0;
@@ -184,9 +193,11 @@ while ($filecount) {
 	while ( my $line = <$HF> )
 	{
 		$lineCount++;
-		next if ($hash_fileIndexComplete->{'startLine'} > $lineCount);
+		next if ($gHash_fileIndexComplete->{'startFile'} eq $filename
+					&& $gHash_fileIndexComplete->{'startLine'} > $lineCount);
 		last if parseInline($line, $lineCount) == -1;
-		last if ($hash_fileIndexComplete->{'endLine'} < $lineCount);
+		last if ($gHash_fileIndexComplete->{'endFile'} eq $filename
+					&& $gHash_fileIndexComplete->{'endLine'} < $lineCount);
 	}
 }
 
@@ -508,13 +519,20 @@ sub summaryReceivers {
 						$countStartedApp++;
 					}
 					
-					printf " %s %6d ms / %s\n", $delimeter, $durationTime, $receiver if $showReceivers > 0;
+					if ($showReceivers > 0) {					
+						print " $delimeter";
+						my $strDuration = subCommifyInt($durationTime);
+						my $space = 8 - length($strDuration);
+						print " " while ($space--);
+						print " $strDuration ms / $receiver\n";
+					}
 					$sumDuration += $durationTime;
+
 				}
 				$prevHref = $href;
 			}
 
-			printf "\n %d ms takes and", $sumDuration;
+			printf "\n ".subCommifyInt($sumDuration)." ms takes and";
 			print " $countStartedApp app started for $intentToFindReceivers.\n";
 			print "\n\n";
 
@@ -576,6 +594,25 @@ sub subCommify {
     my $text = reverse $_[0];
     $text =~ s/(\d\d\d)(?=\d)(?!\d*\.)/$1,/g;
     return scalar reverse $text
+}
+
+sub subCommifyInt {
+	use integer;
+	
+    my $num = $_[0];
+	my $return = "";
+	
+	while ($num > 0) {
+		my $right = $num % 1000;
+		my $left = $num / 1000;
+
+		$return = ",".$return if (length($return) > 0);
+		$return = "$right".$return;
+		last if ($left == 0);
+		$num = $left;
+	}
+
+	return $return;
 }
 
 sub printHash {
