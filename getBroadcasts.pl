@@ -30,6 +30,7 @@ my $endIntent = "android.intent.action.BOOT_COMPLETED";
 my $showNotExist = 0;
 my $showReceivers = 1;
 my $showLogtime = 1;
+my $debug = 0;
 
 my @intentToIgnore = (
 		"android.intent.action.BATTERY_CHANGED",
@@ -71,9 +72,7 @@ my $REGEX_ORDERED_DELIVERY_FINISH = qr/Finished with ordered broadcast Broadcast
 my $REGEX_PARALLEL_DELIVERY_FINISH = qr/Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/;
 
 my $REGEX_DELIVERING_TO_RECEIVER_LIST = qr/Delivering to BroadcastFilter\{\S+ u\S+ (ReceiverList\{\S+ \S+ \S+ \S+\})\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
-# 	01-06 20:00:27.933  1148  2014 V BroadcastQueue: Process cur broadcast BroadcastRecord{16f467f3 u0 android.intent.action.BOOT_COMPLETED} for app ProcessRecord{172541ac 2025:com.android.phone/1001}
 my $REGEX_DELIVERING_TO_APP = qr/Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/;
-#	01-06 20:00:27.933  1148  2014 V BroadcastQueue: Delivering to component ComponentInfo{com.android.phone/com.android.phone.OtaStartupReceiver}: BroadcastRecord{16f467f3 u0 android.intent.action.BOOT_COMPLETED}
 my $REGEX_DELIVERING_TO_APP_COMPONENT = qr/Delivering to component ComponentInfo\{(\S+)\}: BroadcastRecord\{(\S+) u\S+ (\S+)\}$/;
 
 my $REGEX_NEED_APP_START = qr/Need to start app \S+ (\S+) for broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
@@ -119,7 +118,7 @@ sub subScanFileToParse
 		open ($HF, $filename);
 		
 		# read line by line
-		print " READ $filename...\n";
+		print " READ $filename...\n" if ($debug);
 		
 		my $lineCount = 0;
 		
@@ -135,7 +134,7 @@ sub subScanFileToParse
 					my $intent = $2;
 					if ($2 eq $endIntent) {
 						my $index = scalar @arrayIndex;
-						print $line;
+						print $line if ($debug);
 						
 						while ($index) {
 							$index--;
@@ -159,14 +158,14 @@ sub subScanFileToParse
 					my $intent = $3;
 					
 					if ($intent eq $startIntent) {
-					print $line;
+						print $line if ($debug);;
 						my %hash_fileIndex = ();
 						$hash_fileIndex{'startFile'} = $filename;
 						$hash_fileIndex{'startLine'} = $lineCount;
 						push @arrayIndex, \%hash_fileIndex;
 
 					} elsif ($intent eq $endIntent) {
-					print $line;
+						print $line if ($debug);;
 						my $href = $arrayIndex[-1];
 						$href->{'enqueEndIntentUid'} = $2;
 					}
@@ -571,8 +570,6 @@ sub summaryReceivers {
 			printf "\n ".subCommifyInt($sumDuration)." ms takes and";
 			print " $countStartedApp app started for $intentToFindReceivers.\n";
 			print "\n\n";
-
-			print @arrayStartedApp;
 }
 
 
