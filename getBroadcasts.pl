@@ -71,7 +71,10 @@ my $REGEX_ORDERED_DELIVERY_FINISH = qr/Finished with ordered broadcast Broadcast
 my $REGEX_PARALLEL_DELIVERY_FINISH = qr/Done with parallel broadcast \S+ BroadcastRecord\{(\S+) \S+ (\S+)\}/;
 
 my $REGEX_DELIVERING_TO_RECEIVER_LIST = qr/Delivering to BroadcastFilter\{\S+ u\S+ (ReceiverList\{\S+ \S+ \S+ \S+\})\} \(\S+\): BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
+# 	01-06 20:00:27.933  1148  2014 V BroadcastQueue: Process cur broadcast BroadcastRecord{16f467f3 u0 android.intent.action.BOOT_COMPLETED} for app ProcessRecord{172541ac 2025:com.android.phone/1001}
 my $REGEX_DELIVERING_TO_APP = qr/Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/;
+#	01-06 20:00:27.933  1148  2014 V BroadcastQueue: Delivering to component ComponentInfo{com.android.phone/com.android.phone.OtaStartupReceiver}: BroadcastRecord{16f467f3 u0 android.intent.action.BOOT_COMPLETED}
+my $REGEX_DELIVERING_TO_APP_COMPONENT = qr/Delivering to component ComponentInfo\{(\S+)\}: BroadcastRecord\{(\S+) u\S+ (\S+)\}$/;
 
 my $REGEX_NEED_APP_START = qr/Need to start app \S+ (\S+) for broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\}/;
 my $REGEX_ENQUEUE_BR = qr/Enqueueing (\S+) broadcast BroadcastRecord\{(\S+) \S+ (\S+)\}/;
@@ -276,10 +279,19 @@ sub parseInline {
 		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_RECEIVER_LIST/) {
 			addReceiverCount($2);
 			pushReceiver($2, $1, $time, $3);
-
+=cut
+#my $REGEX_DELIVERING_TO_APP = qr/Process cur broadcast BroadcastRecord\{(\S+) u\S+ (\S+)\} DELIVERED for app (.*)$/;
 		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_APP/) {
 			addReceiverCount($1);
 			pushReceiver($1, $3, $time, $2);
+=cut
+#my $REGEX_DELIVERING_TO_APP_COMPONENT = qr/Delivering to component ComponentInfo\{(\S+)\}: BroadcastRecord\{(\S+) u\S+ (\S+)\}$/;
+		} elsif ( $2 =~ /$REGEX_DELIVERING_TO_APP_COMPONENT/) {
+			my $intent = $3;
+			my $uid = $2;
+			my $receiver = $1;
+			addReceiverCount($1);
+			pushReceiver($uid, $receiver, $time, $intent);
 
 		} elsif ( $2 =~ /$REGEX_NEED_APP_START/) {
 			my $appName = $1;
