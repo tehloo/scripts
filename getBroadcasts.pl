@@ -19,9 +19,13 @@ use Time::Piece;
 # CONTANTS...........................................................
 #my $startIntent = "android.intent.action.USER_BACKGROUND";
 my $startIntent = "android.intent.action.USER_STARTED";
+#my $startIntent = "lge.settings.QMODE_ON_PLEASE";
+#my $startIntent = "android.media.AUDIO_BECOMING_NOISY";
 #my $endIntent = "android.intent.action.USER_SWITCHED";
 #my $endIntent = "android.intent.action.USER_STOPPED";
 my $endIntent = "android.intent.action.BOOT_COMPLETED";
+#my $endIntent = "android.media.AUDIO_BECOMING_NOISY";
+#my $endIntent = "lge.settings.QMODE_CHANGED";
 
 my $showNotExist = 0;
 my $showReceivers = 1;
@@ -35,6 +39,8 @@ my @intentToIgnore = (
 	);
 
 my $intentToFindReceivers = "android.intent.action.BOOT_COMPLETED";
+#my $intentToFindReceivers = "android.media.AUDIO_BECOMING_NOISY";
+#my $intentToFindReceivers = "lge.settings.QMODE_ON";
 
 # hashes and arrays for parsing......................................
 my @broadcastList = ();		# get UID as array list.
@@ -74,7 +80,7 @@ my $REGEX_ENQUEUE_BR = qr/Enqueueing (\S+) broadcast BroadcastRecord\{(\S+) \S+ 
 
 # get filename or STDIN via pipe.
 if ( ! @ARGV && isatty(*STDIN) ) {
-    die "usage: ...";
+    die "usage: getBroadcast.pl <FILE_PATH_logger> <INTENT_NAME>";
 }
 
 # open file as dir or single file.
@@ -87,7 +93,7 @@ if (@ARGV) {
 		getFilename($ARGV[0], \@gFileList);
 		die "\nfile not found...\n" if scalar @gFileList == 0;
 		
-	} elsif ( -f $ARGV[0]  ) {
+	} elsif ( -f $ARGV[0] ) {
 		push @gFileList, $ARGV[0];
 	}
 }
@@ -110,7 +116,7 @@ sub subScanFileToParse
 		open ($HF, $filename);
 		
 		# read line by line
-		#print " READ $filename...\n";
+		print " READ $filename...\n";
 		
 		my $lineCount = 0;
 		
@@ -120,14 +126,13 @@ sub subScanFileToParse
 			$lineCount++;
 			if ( $line =~ /$REGEX_TAG_BROADCAST_QUEUE/ ) {		
 				my $time = $1;
-				
-
 
 				if ( $2 =~ /$REGEX_ORDERED_DELIVERY_FINISH/ || $2 =~ /$REGEX_PARALLEL_DELIVERY_FINISH/) {
 					my $uid = $1;
 					my $intent = $2;
 					if ($2 eq $endIntent) {
 						my $index = scalar @arrayIndex;
+						print $line;
 						
 						while ($index) {
 							$index--;
@@ -147,15 +152,18 @@ sub subScanFileToParse
 				my $time = $1;
 
 				if ($2 =~ /$REGEX_ENQUEUE_BR/) {
+				
 					my $intent = $3;
 					
 					if ($intent eq $startIntent) {
+					print $line;
 						my %hash_fileIndex = ();
 						$hash_fileIndex{'startFile'} = $filename;
 						$hash_fileIndex{'startLine'} = $lineCount;
 						push @arrayIndex, \%hash_fileIndex;
 
 					} elsif ($intent eq $endIntent) {
+					print $line;
 						my $href = $arrayIndex[-1];
 						$href->{'enqueEndIntentUid'} = $2;
 					}
@@ -168,15 +176,24 @@ sub subScanFileToParse
 	# pick last cycle to parse.
 	while (my $href = pop @arrayIndex) {
 		if (exists $href->{'endFile'}) {
-			$gHash_fileIndexComplete = $href if ($gHash_fileIndexComplete == 0);
+			# only last cycle choose!
+			# $gHash_fileIndexComplete = $href if ($gHash_fileIndexComplete == 0);
+
+			# first cycle choose!!
+			$gHash_fileIndexComplete = $href;
+
 			$cycleCount++;
 		}
 	}
 
-	print "\n Scan completed... ";
+	print "\n Scan completed... " ;
 	print "$cycleCount times cycles in log...\n";
-	print "\t from ".$gHash_fileIndexComplete->{'startFile'}." line #".$gHash_fileIndexComplete->{'startLine'};
-	print "\n\t to ".$gHash_fileIndexComplete->{'endFile'}." line #".$gHash_fileIndexComplete->{'endLine'}."\n";
+	if ($cycleCount > 0) {
+		print "\t from ".$gHash_fileIndexComplete->{'startFile'}." line #".$gHash_fileIndexComplete->{'startLine'};
+		print "\n\t to ".$gHash_fileIndexComplete->{'endFile'}." line #".$gHash_fileIndexComplete->{'endLine'}."\n";
+	} else {
+		die "\n unable to get any information from this log file.\n";		
+	}
 	#printHash (\%hash_fileIndexComplete, "\n");
 	print "\n";
 }
@@ -499,7 +516,8 @@ summaryReceivers();
 ####  get receivers
 ######################################
 sub summaryReceivers {
-			print "\n ". scalar @receiverList." Receivers for $intentToFindReceivers \n";
+			print "\n ".$#receiverList." Receivers for $intentToFindReceivers \n";
+			
 
 			my $prevTime = 0;
 			my $countStartedApp = 0;
@@ -613,7 +631,10 @@ sub subCommifyInt {
 		my $left = $num / 1000;
 
 		$return = ",".$return if (length($return) > 0);
-		$return = "$right".$return;
+		if ($left > 0 && $right < 10) { $return = "00".$right.$return; }
+		elsif ($left > 0 && $right < 100) { $return = "0".$right.$return; }
+		else {$return = $right.$return; }
+		
 		last if ($left == 0);
 		$num = $left;
 	}

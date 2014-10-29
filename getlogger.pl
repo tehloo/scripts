@@ -9,7 +9,15 @@ my $logPath;
 my @out;
 
 if ($#ARGV == 0) {
-	$logPath = $ARGV[0];
+	if ($ARGV[0] eq "-d") {
+		adb_rmLogs();
+		exit;
+	} elsif ($ARGV[0] eq "-l") {
+		adb_lsLogs();
+		exit;
+	} else {
+		$logPath = $ARGV[0];
+	}
 } else {
 	$logPath = strftime('%Y%m%d_%H%M%S', localtime);
 }
@@ -27,4 +35,18 @@ sub adb_pull {
 	@out = `$cmd`;
 	print "\n\n"
 #	print " result\n".@out;
+}
+
+sub adb_rmLogs {
+	print " - delete logs\n\n ";
+	my $cmd = "adb shell rm /data/logger/*";
+	@out = `$cmd`;
+	print "@out\n\n"
+}
+
+sub adb_lsLogs {
+	print " - ls logs\n\n ";
+	my $cmd = "adb shell ls -l /data/logger/*";
+	@out = `$cmd`;
+	print "@out\n\n"
 }
